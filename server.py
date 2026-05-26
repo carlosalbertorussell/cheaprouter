@@ -453,4 +453,4 @@ if __name__ == "__main__":
     if "--stdio" in sys.argv:
         mcp.run()
     else:
-        mcp.run(transport="sse", host="0.0.0.0", port=_PORT)
+        mcp.run(transport="http", host="0.0.0.0", port=_PORT)
