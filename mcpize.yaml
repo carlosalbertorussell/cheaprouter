@@ -1,0 +1,32 @@
+# MCPize Configuration
+# Docs: https://mcpize.com/docs/mcpize-yaml
+
+version: 1
+
+name: "CheapRouter"
+slug: "cheaprouter"
+
+runtime: python
+entry: "server.py"
+
+build:
+  install: "pip install -r requirements.txt"
+
+start:
+  type: stdio
+  command: "python"
+  args:
+    - "server.py"
+    - "--stdio"
+
+bridge:
+  mode: stdio
+
+credentials:
+  - name: "ANTHROPIC_API_KEY"
+  - name: "OPENAI_API_KEY"
+  - name: "GEMINI_API_KEY"
+  - name: "GROQ_API_KEY"
+  - name: "MISTRAL_API_KEY"
+  - name: "DEEPSEEK_API_KEY"
+  - name: "DASHSCOPE_API_KEY"
