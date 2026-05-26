@@ -280,6 +280,34 @@ PROVIDERS: dict[str, ProviderConfig] = {
             ),
         },
     ),
+
+    "grok": ProviderConfig(
+        name="xAI Grok",
+        region="us",
+        base_url="https://api.x.ai",
+        api_key_env="XAI_API_KEY",
+        protocol="openai",
+        models={
+            TIER_FAST: ModelConfig(
+                model_id="grok-4.1-fast",
+                input_price_per_1m=0.20,
+                output_price_per_1m=0.50,
+                context_window=2_000_000,
+            ),
+            TIER_BALANCED: ModelConfig(
+                model_id="grok-4.3",
+                input_price_per_1m=1.25,
+                output_price_per_1m=2.50,
+                context_window=1_000_000,
+            ),
+            TIER_POWERFUL: ModelConfig(
+                model_id="grok-4",
+                input_price_per_1m=3.00,
+                output_price_per_1m=15.00,
+                context_window=131_072,
+            ),
+        },
+    ),
 }
 
 
