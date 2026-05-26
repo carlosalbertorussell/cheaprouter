@@ -11,3 +11,4 @@ env:
   LATENCY_THRESHOLD_MS: "300"
   BLOCKED_REGIONS: ""
   ARBITRAGE_HISTORY_FILE: "/tmp/routing_history.jsonl"
+  PORT: "8081"
