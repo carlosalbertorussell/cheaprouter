@@ -1,7 +1,19 @@
 # cheaprouter
 
+[![MCPize](https://mcpize.com/badge/@crussell/cheaprouter)](https://mcpize.com/mcp/cheaprouter)
+
 An MCP server that routes LLM completion requests to the cheapest available provider,
 selecting dynamically based on token price, region, latency, and availability.
+
+## Connect via MCPize
+
+Use this MCP server instantly with no local installation:
+
+```bash
+npx -y mcpize connect @crussell/cheaprouter --client claude
+```
+
+Or connect at: **https://mcpize.com/mcp/cheaprouter**
 
 ## Providers
 
@@ -169,4 +181,3 @@ cheaprouter/
 ├── requirements.txt
 ├── .env.example
 └── README.md
-```
