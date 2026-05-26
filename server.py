@@ -29,6 +29,9 @@ try:
 except ImportError:
     pass
 
+import os
+_PORT = int(os.environ.get("PORT", 8081))
+
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
@@ -38,7 +41,11 @@ from router import route
 from client import call_provider
 from history import log_decision, read_history, history_summary
 
-mcp = FastMCP("cheaprouter")
+mcp = FastMCP(
+    "cheaprouter",
+    host="0.0.0.0",
+    port=_PORT,
+)
 
 # ─── Shared field definitions ─────────────────────────────────────────────────
 
@@ -446,4 +453,4 @@ if __name__ == "__main__":
     if "--stdio" in sys.argv:
         mcp.run()
     else:
-        mcp.run(transport="streamable_http", port=8000)
+        mcp.run(transport="sse", host="0.0.0.0", port=_PORT)
