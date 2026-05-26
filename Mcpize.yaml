@@ -1,0 +1,13 @@
+name: cheaprouter
+version: 1.0.0
+description: "Routes LLM completion requests to the cheapest available provider across Anthropic, OpenAI, Gemini, Groq, Mistral, DeepSeek, and Qwen. BYOK — users supply their own provider keys per request."
+runtime: python
+entrypoint: server.py
+
+build:
+  command: pip install -r requirements.txt
+
+env:
+  LATENCY_THRESHOLD_MS: "300"
+  BLOCKED_REGIONS: ""
+  ARBITRAGE_HISTORY_FILE: "/tmp/routing_history.jsonl"
