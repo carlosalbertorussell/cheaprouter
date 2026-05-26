@@ -51,7 +51,7 @@ API_KEYS_DESC = (
     "Keys are used only for this request and never stored or logged."
 )
 
-PROVIDER_IDS = ["anthropic", "openai", "gemini", "groq", "mistral", "deepseek", "qwen"]
+PROVIDER_IDS = ["anthropic", "openai", "gemini", "groq", "mistral", "deepseek", "qwen", "grok"]
 
 
 # ─── Input models ─────────────────────────────────────────────────────────────
