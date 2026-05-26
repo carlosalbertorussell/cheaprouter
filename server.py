@@ -451,6 +451,6 @@ async def arbitrage_get_history(params: GetHistoryInput) -> str:
 
 if __name__ == "__main__":
     if "--stdio" in sys.argv:
-        mcp.run()
+        mcp.run(transport="stdio")
     else:
-        mcp.run(transport="http", host="0.0.0.0", port=_PORT)
+        mcp.run(transport="streamable-http")
