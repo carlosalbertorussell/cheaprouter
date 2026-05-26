@@ -14,6 +14,7 @@ selecting dynamically based on token price, region, latency, and availability.
 | Mistral AI | EU | mistral-small | mistral-medium | mistral-large |
 | DeepSeek | CN | deepseek-chat (V3) | deepseek-chat (V3) | deepseek-reasoner (R1) |
 | Alibaba Qwen | CN | qwen-turbo | qwen-plus | qwen-max |
+| xAI Grok | US | grok-4.1-fast | grok-4.3 | grok-4 |
 
 > **Note on CN providers (DeepSeek, Qwen):** Latency from Buenos Aires is ~390ms.
 > Pass `latency_sensitive: true` to route_completion to exclude them automatically
