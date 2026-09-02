@@ -16,11 +16,12 @@ updates:
     commit-message:
       prefix: "deps"
     ignore:
-      # mcp is the core dependency — pin major version changes for manual review
+      # mcp is the core dependency and its 2.x line renamed FastMCP -> MCPServer,
+      # breaking startup. Block ALL mcp updates from Dependabot; bump manually
+      # only after verifying the FastMCP API still matches server.py.
       - dependency-name: "mcp"
-        update-types: ["version-update:semver-major"]
 
-  # GitHub Actions (if any are added later)
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
