@@ -10,7 +10,7 @@ selecting dynamically based on token price, region, latency, and availability.
 **BYOK** — bring your own provider keys, passed per request. cheaprouter holds no
 credentials and stores no content.
 
-**Docs:** [CONNECT](CONNECT.md) · [MCPize tool reference](MCPIZE_DOCS.md) · [Architecture](ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+**Docs:** [CONNECT](CONNECT.md) · [MCPize tool reference](MCPIZE_DOCS.md) · [Architecture](ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Roadmap](SPRINTS.md)
 
 ## Providers
 
