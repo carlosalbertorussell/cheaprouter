@@ -1,7 +1,16 @@
 # cheaprouter
 
+![CI](https://github.com/carlosalbertorussell/cheaprouter/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+
 An MCP server that routes LLM completion requests to the cheapest available provider,
 selecting dynamically based on token price, region, latency, and availability.
+
+**BYOK** — bring your own provider keys, passed per request. cheaprouter holds no
+credentials and stores no content.
+
+**Docs:** [CONNECT](CONNECT.md) · [MCPize tool reference](MCPIZE_DOCS.md) · [Architecture](ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
 ## Providers
 
@@ -54,19 +63,12 @@ mcpize login
 
 # From your GitHub repo (MCPize reads mcpize.yaml automatically):
 mcpize deploy
-
-# Inject secrets — never commit API keys to Git
-mcpize secrets set ANTHROPIC_API_KEY sk-ant-...
-mcpize secrets set OPENAI_API_KEY sk-...
-mcpize secrets set GROQ_API_KEY gsk_...
-mcpize secrets set DEEPSEEK_API_KEY sk-...
-mcpize secrets set DASHSCOPE_API_KEY sk-...
-# (set only the providers you want active)
 ```
 
-MCPize handles hosting, SSL, scaling, and secrets injection. Your deployed server
-gets a public HTTPS endpoint you can connect to directly from Claude.ai or any
-MCP-compatible client.
+No secrets to configure — cheaprouter is BYOK. Users supply their own provider
+keys per request in the `api_keys` parameter; the server holds no credentials.
+MCPize handles hosting, SSL, and scaling, giving you a public HTTPS endpoint you
+can connect to from Claude.ai or any MCP-compatible client. See [CONNECT.md](CONNECT.md).
 
 > **Note on history:** The routing history file lives at `/tmp/routing_history.jsonl`
 > on MCPize and resets on each redeploy. For persistent spend tracking, override
@@ -156,18 +158,35 @@ as of mid-2025. Prices change frequently — verify against official pricing pag
 - https://mistral.ai/technology/
 - https://api-docs.deepseek.com/quick_start/pricing
 - https://www.alibabacloud.com/help/en/model-studio/models
+- https://docs.x.ai/docs/models
 
 ## Project structure
 
 ```
 cheaprouter/
 ├── server.py        — FastMCP server, all tool definitions
-├── providers.py     — Provider registry: models, pricing, regions
+├── providers.py     — Provider registry: models, pricing, regions, BYOK key resolution
 ├── pricing.py       — Cost calculation and comparison tables
 ├── router.py        — Routing decision engine
 ├── client.py        — Async API client (Anthropic / OpenAI-compat / Gemini)
 ├── history.py       — JSONL routing history logger
+├── tests/           — pytest suite (pricing, routing, providers, key-leak guard)
+├── Dockerfile       — container build
+├── Makefile         — install / test / run shortcuts
+├── pyproject.toml   — package metadata and dependencies
+├── mcpize.yaml      — MCPize deployment config
 ├── requirements.txt
 ├── .env.example
+├── CONNECT.md       — how to connect from MCP clients
+├── MCPIZE_DOCS.md   — full tool reference for the MCPize listing
+├── ARCHITECTURE.md  — design and request flow
+├── CONTRIBUTING.md
+├── CHANGELOG.md
+├── SECURITY.md
+├── LICENSE          — MIT
 └── README.md
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE). Free to use, modify, and distribute.
