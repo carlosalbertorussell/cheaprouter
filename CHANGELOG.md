@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Sprint roadmap (`SPRINTS.md`): S1 spend analytics active; failover, prompt-caching awareness, live pricing refresh, and streaming in backlog.
+
 ## [1.0.0] — 2026-09-02
 
 ### Added
