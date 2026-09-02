@@ -1,0 +1,51 @@
+[project]
+name = "cheaprouter"
+version = "1.0.0"
+description = "BYOK MCP server that routes LLM completions to the cheapest available provider across 8 providers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Carlos Alberto Russell" }]
+keywords = ["mcp", "llm", "routing", "arbitrage", "byok", "cost-optimization"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "mcp[cli]>=1.6.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.7.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/carlosalbertorussell/cheaprouter"
+Repository = "https://github.com/carlosalbertorussell/cheaprouter"
+Issues = "https://github.com/carlosalbertorussell/cheaprouter/issues"
+Changelog = "https://github.com/carlosalbertorussell/cheaprouter/blob/main/CHANGELOG.md"
+
+[project.scripts]
+cheaprouter = "server:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["server", "providers", "pricing", "router", "client", "history"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
