@@ -13,7 +13,8 @@ router.py     — routing decision engine (price → availability → latency �
 pricing.py    — cost calculation and comparison-table rendering
 providers.py  — provider registry: models, per-tier pricing, regions, key resolution
 client.py     — async HTTP client; three wire protocols
-history.py    — JSONL routing log with spend/savings aggregation
+history.py    — spend analytics: sessions, spend report, budgets (over storage.py)
+storage.py    — pluggable history backend (Supabase when configured, JSONL fallback)
 ```
 
 ## Request flow: `arbitrage_route_completion`

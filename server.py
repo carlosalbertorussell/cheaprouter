@@ -39,7 +39,10 @@ from providers import PROVIDERS, VALID_TIERS, resolve_api_key
 from pricing import estimate_all_providers, format_pricing_table
 from router import route
 from client import call_provider
-from history import log_decision, read_history, history_summary
+from history import (
+    log_decision, read_history, history_summary,
+    spend_report, set_budget, budget_status,
+)
 
 mcp = FastMCP(
     "cheaprouter",
@@ -110,6 +113,7 @@ class RouteCompletionInput(BaseModel):
     excluded_providers: list[str] = Field(default_factory=list, description="Provider IDs to skip")
     allowed_regions: Optional[list[str]] = Field(None, description="Restrict routing to these regions")
     estimated_output_tokens: int = Field(500, description="Estimated output tokens for pre-flight cost routing", ge=1, le=500_000)
+    session: Optional[str] = Field(None, description="Opaque session token to attribute spend to you. Reused across requests to track your own cumulative spend; never mapped to your identity.")
 
     @field_validator("tier")
     @classmethod
@@ -129,6 +133,20 @@ class GetHistoryInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     limit: int = Field(20, description="Number of recent records to return", ge=1, le=100)
     summary_only: bool = Field(False, description="If True, return aggregated stats only")
+    session: Optional[str] = Field(None, description="Scope history to your session token. Omit to see the global (unscoped) history.")
+
+
+class SpendReportInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    session: Optional[str] = Field(None, description="Scope the report to your session token. Omit for global spend.")
+    limit: int = Field(500, description="Max records to aggregate", ge=1, le=2000)
+    since: Optional[str] = Field(None, description="ISO date/datetime (e.g. '2026-09-01'); exclude older records.")
+
+
+class SetBudgetInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    session: str = Field(..., description="Your session token — the budget is scoped to it.")
+    monthly_usd: float = Field(..., description="Monthly spend budget in USD.", gt=0)
 
 
 # ─── Tools ────────────────────────────────────────────────────────────────────
@@ -309,7 +327,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         )
     except Exception as exc:
         error_msg = str(exc)
-        log_decision(decision.to_dict(), error=error_msg)
+        log_decision(decision.to_dict(), session=params.session, error=error_msg)
         return json.dumps({
             "error": f"Provider call failed: {error_msg}",
             "provider_attempted": winner.provider_name,
@@ -322,13 +340,14 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
 
     log_decision(
         decision_dict=decision.to_dict(),
-        completion_text=completion.text,
+        session=params.session,
         actual_input_tokens=completion.input_tokens_used,
         actual_output_tokens=completion.output_tokens_used,
         actual_latency_ms=completion.latency_ms,
+        actual_cost_usd=actual_total_cost,
     )
 
-    return json.dumps({
+    result = {
         "response": completion.text,
         "routing": {
             "provider": winner.provider_name,
@@ -345,7 +364,19 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         },
         "latency_ms": completion.latency_ms,
         "excluded_providers": decision.excluded,
-    }, indent=2)
+    }
+
+    # Budget alert (S1.5): if the caller set a budget for this session, surface usage.
+    if params.session:
+        status = budget_status(params.session)
+        if status:
+            result["budget"] = status
+            if status["over_budget"]:
+                result["budget"]["alert"] = "You are over your monthly budget."
+            elif status["used_pct"] >= 80:
+                result["budget"]["alert"] = f"You've used {status['used_pct']}% of your monthly budget."
+
+    return json.dumps(result, indent=2)
 
 
 @mcp.tool(
@@ -426,25 +457,90 @@ async def arbitrage_get_history(params: GetHistoryInput) -> str:
     """
     Return past routing decisions with cost tracking and savings analysis.
 
-    Note: history is server-side and aggregated across all users. It records
-    which providers were selected, token usage, cost, and latency — never API keys.
+    Records carry routing metadata only — provider, tier, region, token counts,
+    cost, latency, savings — never API keys and never message content. Pass a
+    `session` token to see only your own records; omit it for the global history.
 
     Args:
         params (GetHistoryInput):
             - limit (int): Number of recent records (default 20, max 100)
             - summary_only (bool): If True, return aggregate stats only
+            - session (str, optional): Scope to your session token
 
     Returns:
         str: JSON with routing history or aggregate summary.
     """
     if params.summary_only:
-        return json.dumps(history_summary(params.limit), indent=2)
+        return json.dumps(history_summary(params.limit, params.session), indent=2)
 
-    records = read_history(params.limit)
+    records = read_history(params.limit, params.session)
     if not records:
         return json.dumps({"message": "No routing history found.", "records": []})
 
-    return json.dumps({"summary": history_summary(params.limit), "records": records}, indent=2)
+    return json.dumps(
+        {"summary": history_summary(params.limit, params.session), "records": records},
+        indent=2,
+    )
+
+
+@mcp.tool(
+    name="arbitrage_spend_report",
+    annotations={
+        "title": "Spend Report",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def arbitrage_spend_report(params: SpendReportInput) -> str:
+    """
+    Break down spend by provider, by tier, and by day, with total saved vs. the
+    most expensive alternative at each routing decision.
+
+    Pass a `session` token to scope the report to your own spend. Requires the
+    persistent store (Supabase) to be useful across redeploys; with local JSONL
+    it reflects only the current container's history.
+
+    Args:
+        params (SpendReportInput):
+            - session (str, optional): Scope to your session token
+            - limit (int): Max records to aggregate (default 500)
+            - since (str, optional): ISO date; exclude older records
+
+    Returns:
+        str: JSON with spend_by_provider, spend_by_tier, spend_by_day, and totals.
+    """
+    return json.dumps(spend_report(params.session, params.limit, params.since), indent=2)
+
+
+@mcp.tool(
+    name="arbitrage_set_budget",
+    annotations={
+        "title": "Set Monthly Budget",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def arbitrage_set_budget(params: SetBudgetInput) -> str:
+    """
+    Set a monthly USD spend budget for your session. Once set, every
+    arbitrage_route_completion call made with the same session token returns a
+    budget status, with an alert when you cross 80% or go over.
+
+    Args:
+        params (SetBudgetInput):
+            - session (str): Your session token (required — the budget is scoped to it)
+            - monthly_usd (float): Monthly budget in USD
+
+    Returns:
+        str: JSON confirming the stored budget, plus current status.
+    """
+    stored = set_budget(params.session, params.monthly_usd)
+    status = budget_status(params.session)
+    return json.dumps({"budget_set": stored, "current_status": status}, indent=2)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

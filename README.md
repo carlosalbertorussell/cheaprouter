@@ -169,7 +169,8 @@ cheaprouter/
 ├── pricing.py       — Cost calculation and comparison tables
 ├── router.py        — Routing decision engine
 ├── client.py        — Async API client (Anthropic / OpenAI-compat / Gemini)
-├── history.py       — JSONL routing history logger
+├── history.py       — spend analytics: sessions, spend report, budgets
+├── storage.py       — pluggable history backend (Supabase / JSONL)
 ├── tests/           — pytest suite (pricing, routing, providers, key-leak guard)
 ├── Dockerfile       — container build
 ├── Makefile         — install / test / run shortcuts
