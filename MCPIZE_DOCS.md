@@ -227,6 +227,69 @@ all users; it records routing metadata only, never request content or API keys.
 total savings, and per-provider usage counts. With `summary_only: false`,
 includes individual routing records.
 
+Pass `session` to scope history to your own records; omit it for the global view.
+
+---
+
+### `arbitrage_spend_report`
+
+Breaks your spend down by provider, by tier, and by day, with total saved versus
+the most expensive alternative at each routing decision. This is the analytics
+view for tracking cost over time.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `session` | string | — | `null` | Scope the report to your session token. Omit for global spend. |
+| `limit` | integer | — | 500 | Max records to aggregate |
+| `since` | string | — | `null` | ISO date (e.g. `2026-09-01`); exclude older records |
+
+**Example:**
+```json
+{ "session": "my-app-prod", "since": "2026-09-01" }
+```
+
+**Returns:** JSON with `spend_by_provider`, `spend_by_tier`, `spend_by_day`, and
+totals for cost and savings.
+
+> **Note:** durable spend across redeploys requires the Supabase backend
+> (`SUPABASE_URL` + `SUPABASE_KEY`). With the local JSONL fallback the report
+> reflects only the current container's history.
+
+---
+
+### `arbitrage_set_budget`
+
+Sets a monthly USD spend budget for your session. Once set, every
+`arbitrage_route_completion` call made with the same `session` token returns a
+budget status, with an alert when you cross 80% or go over.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `session` | string | ✅ | — | Your session token — the budget is scoped to it |
+| `monthly_usd` | number | ✅ | — | Monthly budget in USD |
+
+**Example:**
+```json
+{ "session": "my-app-prod", "monthly_usd": 50.0 }
+```
+
+**Returns:** JSON confirming the stored budget and current month-to-date status.
+
+---
+
+## Sessions & spend tracking
+
+cheaprouter never holds your identity. To track your own spend, pass a `session`
+token — any opaque string you choose — on `arbitrage_route_completion`,
+`arbitrage_get_history`, `arbitrage_spend_report`, and `arbitrage_set_budget`.
+Reuse the same token across requests to accumulate spend under it. The server
+stores only a one-way hash of the token, never the raw value, and one session
+can never read another's records.
+
 ---
 
 ## Routing Logic

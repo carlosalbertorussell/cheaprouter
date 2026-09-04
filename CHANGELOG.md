@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **S1 spend analytics (Pro-tier foundation).** Durable, session-scoped spend tracking. New tools `arbitrage_spend_report` (spend by provider/tier/day) and `arbitrage_set_budget` (monthly budget with 80%/over alerts surfaced in route_completion). Pluggable storage backend: Supabase when `SUPABASE_URL`/`SUPABASE_KEY` are set (schema in `docs/supabase-schema.sql`), local JSONL otherwise — self-hosters need no cloud dependency. Opaque per-session attribution; the store holds routing metadata only, never keys or content.
+
+### Changed
+- `arbitrage_route_completion` and `arbitrage_get_history` accept an optional `session` token to attribute and scope spend.
+
+### Fixed
+- History no longer stores a response-content preview — the store is now metadata-only, verified by test (privacy invariant A).
+
 ### Fixed
 - Pin `mcp[cli]` to `<2`: the 2.x SDK renamed `FastMCP` to `MCPServer`, breaking server startup on deploy. Dependabot now ignores all `mcp` updates (manual bump only, after verifying the FastMCP API).
 
