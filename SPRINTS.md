@@ -59,6 +59,23 @@ Prioritized. Top of list = next candidate after S1. Each is a sprint-sized unit.
   streaming variant so real completion workloads get token-by-token output. Biggest
   functional gap for production use.
 
+- **S8 — Provider health & error-rate tracking.** `history.py` already logs failures;
+  feed that back into routing so a provider currently throwing errors is automatically
+  deprioritized. Turns the existing log into a live routing signal and is the natural
+  precursor to S2 failover — build alongside it.
+
+- **S9 — Accurate token counting.** Input is estimated at chars/4 today, which skews the
+  pre-flight cost ranking. Use each provider's real tokenizer so the routing decision is
+  accurate rather than approximate. Small change, direct correctness gain on the core
+  cost comparison.
+
+- **S10 — Semantic response cache.** A cache *in front of* routing: if the same or a
+  near-identical prompt was answered recently, return the cached response and skip the API
+  call entirely — the cheapest token is the one never spent. Largest potential saving of
+  anything in the backlog, and the most novel; also the most complex, with correctness and
+  staleness trade-offs to design carefully. A sprint on its own. Distinct from S3, which is
+  provider-side prompt caching.
+
 ### Moderate value
 
 - **S6 — Batch API routing.** OpenAI and Anthropic batch endpoints run ~50% cheaper for
@@ -67,6 +84,22 @@ Prioritized. Top of list = next candidate after S1. Each is a sprint-sized unit.
 - **S7 — Quality/capability scoring.** Tiers are hand-mapped today. Layer a benchmark
   signal per model so routing can weigh capability, not just price — a `min_quality`
   constraint alongside cost.
+
+- **S11 — Per-request cost ceiling.** A `max_cost_usd` parameter that refuses to route if
+  even the cheapest eligible provider would exceed it — a hard guardrail, not just the
+  soft budget alert from S1. Pairs naturally with the S1 budget work.
+
+- **S12 — Structured-output / tool-calling passthrough.** Many callers need JSON mode or
+  function calling. Routing must account for which providers support it at which tier, or
+  it will route to a provider that can't honor the request. Adds a capability constraint
+  to the eligibility filter.
+
+- **S13 — Weighted cost-quality routing.** Instead of pure cheapest, a tunable knob:
+  "cheapest within X% quality of the best." Depends on S7 quality scoring landing first.
+
+- **S14 — Multi-key rotation per provider.** For heavy users hitting rate limits:
+  round-robin across several keys for the same provider. Niche but real; must preserve the
+  BYOK no-storage invariant (keys still arrive per request).
 
 ### Deferred / out of scope
 

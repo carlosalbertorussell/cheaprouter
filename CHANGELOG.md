@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pin `mcp[cli]` to `<2`: the 2.x SDK renamed `FastMCP` to `MCPServer`, breaking server startup on deploy. Dependabot now ignores all `mcp` updates (manual bump only, after verifying the FastMCP API).
 
 ### Added
-- Sprint roadmap (`SPRINTS.md`): S1 spend analytics active; failover, prompt-caching awareness, live pricing refresh, and streaming in backlog.
+- Sprint roadmap (`SPRINTS.md`): S1 spend analytics active; backlog S2–S14 covering failover, prompt-caching awareness, live pricing, streaming, health tracking, accurate token counting, semantic response cache, batch routing, quality scoring, cost ceilings, structured-output passthrough, weighted routing, and multi-key rotation.
 
 ## [1.0.0] — 2026-09-02
 
