@@ -1,0 +1,25 @@
+name: Weekly price-freshness check
+
+# A standing reminder: runs every Monday and on demand, reporting whether the
+# price table is stale. It does not gate anything — it exists so a stale table
+# surfaces in the Actions tab even when no one is pushing code. When it fails,
+# re-verify prices against the provider pages and update verified_at in prices.json.
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"   # Mondays 09:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check price-table freshness
+        run: python scripts/check_prices.py

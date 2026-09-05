@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 from providers import PROVIDERS, VALID_TIERS, resolve_api_key
 from pricing import estimate_all_providers, format_pricing_table
+from pricing_table import price_table_status, is_stale, age_days, _allow_stale, VERIFIED_AT, MAX_AGE_DAYS
 from router import route
 from health import provider_health
 from client import call_provider, is_transient_error
@@ -166,6 +167,30 @@ class CountTokensInput(BaseModel):
 
 # ─── Tools ────────────────────────────────────────────────────────────────────
 
+def _stale_price_refusal() -> Optional[str]:
+    """
+    Return a JSON refusal string if prices are stale and the override is off,
+    else None. Routing and cost estimation must not run on a stale table —
+    a wrong savings figure is worse than a visible refusal.
+    """
+    import pricing_table as _pt
+    if not _pt.is_stale():
+        return None
+    if _pt._allow_stale():
+        return None
+    return json.dumps({
+        "error": "price_table_stale",
+        "message": (
+            f"Provider prices were last verified on {_pt.VERIFIED_AT.isoformat()} "
+            f"({_pt.age_days()} days ago), exceeding the {_pt.MAX_AGE_DAYS}-day limit. "
+            f"Routing and cost estimation are refused because a savings figure "
+            f"computed from stale prices cannot be trusted. Re-verify prices in "
+            f"prices.json (update 'verified_at'), or set "
+            f"ARBITRAGE_ALLOW_STALE_PRICES=1 to proceed with a warning."
+        ),
+        "price_table": _pt.price_table_status(),
+    }, indent=2)
+
 @mcp.tool(
     name="arbitrage_get_pricing",
     annotations={
@@ -201,7 +226,15 @@ async def arbitrage_get_pricing(params: GetPricingInput) -> str:
     priciest = estimates[-1]
     configured = [e for e in estimates if e.is_configured]
 
-    lines = [
+    lines = []
+    pt = price_table_status()
+    if pt["stale"]:
+        lines.append(
+            f"> ⚠️ **Stale prices.** Last verified {pt['verified_at']} "
+            f"({pt['age_days']} days ago, limit {pt['max_age_days']}). "
+            f"These figures may be inaccurate — routing is refused until prices are re-verified.\n"
+        )
+    lines += [
         f"## Token pricing — `{params.tier}` tier",
         f"**Volume:** {params.input_tokens:,} input · {params.output_tokens:,} output tokens\n",
         table,
@@ -249,6 +282,10 @@ async def arbitrage_estimate_cost(params: EstimateCostInput) -> str:
     Returns:
         str: JSON routing decision — winner, ranked alternatives, exclusions, savings.
     """
+    refusal = _stale_price_refusal()
+    if refusal:
+        return refusal
+
     decision = route(
         providers=PROVIDERS,
         tier=params.tier,
@@ -267,7 +304,9 @@ async def arbitrage_estimate_cost(params: EstimateCostInput) -> str:
             "known_providers": PROVIDER_IDS,
         }, indent=2)
 
-    return json.dumps(decision.to_dict(), indent=2)
+    result = decision.to_dict()
+    result["price_table"] = price_table_status()
+    return json.dumps(result, indent=2)
 
 
 @mcp.tool(
@@ -303,6 +342,10 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         str: JSON with completion text, routing metadata, actual token usage,
              actual cost, and savings vs. most expensive alternative.
     """
+    refusal = _stale_price_refusal()
+    if refusal:
+        return refusal
+
     estimated_input = count_message_tokens(params.messages, params.system_prompt)
 
     decision = route(
@@ -427,6 +470,15 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         "deprioritized_providers": decision.deprioritized or [],
     }
 
+    # Price-table provenance on every response. If we got here while stale, the
+    # override must be on — surface a loud warning alongside the result.
+    result["price_table"] = price_table_status()
+    if result["price_table"]["stale"]:
+        result["price_table"]["warning"] = (
+            "Prices are stale; routing proceeded because ARBITRAGE_ALLOW_STALE_PRICES is set. "
+            "The cost and savings figures may be inaccurate."
+        )
+
     # Budget alert (S1.5): if the caller set a budget for this session, surface usage.
     if params.session:
         status = budget_status(params.session)
@@ -501,6 +553,7 @@ async def arbitrage_provider_status(params: ProviderStatusInput) -> str:
             "keys_provided": keyed_count,
             "keys_missing": len(statuses) - keyed_count,
         },
+        "price_table": price_table_status(),
     }, indent=2)
 
 

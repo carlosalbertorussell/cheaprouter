@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "verified_at": "2025-06-30",
+  "verified_by": "Imported unverified from the original hardcoded providers.py literals (README dated them 'approximately mid-2025'). Values have NOT been checked against live provider pricing pages. verified_at is the honest date implied by that note, not a current verification.",
+  "max_age_days": 45,
+  "currency": "USD",
+  "unit": "per_1m_tokens",
+  "pricing_urls": {
+    "anthropic": "https://www.anthropic.com/pricing",
+    "openai": "https://openai.com/pricing",
+    "gemini": "https://ai.google.dev/pricing",
+    "groq": "https://groq.com/pricing/",
+    "mistral": "https://mistral.ai/technology/",
+    "deepseek": "https://api-docs.deepseek.com/quick_start/pricing",
+    "qwen": "https://www.alibabacloud.com/help/en/model-studio/models",
+    "grok": null
+  },
+  "notes": {
+    "grok": "No official pricing URL was ever recorded in the README for xAI Grok. Its numbers carry over with the rest and remain unverified; a source must be established before they can be marked verified."
+  },
+  "providers": {
+    "anthropic": {
+      "name": "Anthropic",
+      "region": "us",
+      "base_url": "https://api.anthropic.com",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "protocol": "anthropic",
+      "extra_headers": {"anthropic-version": "2023-06-01"},
+      "models": {
+        "tier_fast": {"model_id": "claude-haiku-4-5-20251001", "input_price_per_1m": 0.80, "output_price_per_1m": 4.00, "context_window": 200000},
+        "tier_balanced": {"model_id": "claude-sonnet-4-6", "input_price_per_1m": 3.00, "output_price_per_1m": 15.00, "context_window": 200000},
+        "tier_powerful": {"model_id": "claude-opus-4-6", "input_price_per_1m": 15.00, "output_price_per_1m": 75.00, "context_window": 200000}
+      }
+    },
+    "openai": {
+      "name": "OpenAI",
+      "region": "us",
+      "base_url": "https://api.openai.com",
+      "api_key_env": "OPENAI_API_KEY",
+      "protocol": "openai",
+      "models": {
+        "tier_fast": {"model_id": "gpt-4o-mini", "input_price_per_1m": 0.15, "output_price_per_1m": 0.60, "context_window": 128000},
+        "tier_balanced": {"model_id": "gpt-4o", "input_price_per_1m": 2.50, "output_price_per_1m": 10.00, "context_window": 128000},
+        "tier_powerful": {"model_id": "o3", "input_price_per_1m": 10.00, "output_price_per_1m": 40.00, "context_window": 200000}
+      }
+    },
+    "gemini": {
+      "name": "Google Gemini",
+      "region": "us",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "api_key_env": "GEMINI_API_KEY",
+      "protocol": "gemini",
+      "models": {
+        "tier_fast": {"model_id": "gemini-2.0-flash", "input_price_per_1m": 0.10, "output_price_per_1m": 0.40, "context_window": 1048576},
+        "tier_balanced": {"model_id": "gemini-1.5-pro", "input_price_per_1m": 1.25, "output_price_per_1m": 5.00, "context_window": 2097152},
+        "tier_powerful": {"model_id": "gemini-2.5-pro", "input_price_per_1m": 3.50, "output_price_per_1m": 14.00, "context_window": 1048576}
+      }
+    },
+    "groq": {
+      "name": "Groq",
+      "region": "us",
+      "base_url": "https://api.groq.com/openai",
+      "api_key_env": "GROQ_API_KEY",
+      "protocol": "openai",
+      "models": {
+        "tier_fast": {"model_id": "llama-3.1-8b-instant", "input_price_per_1m": 0.05, "output_price_per_1m": 0.08, "context_window": 128000},
+        "tier_balanced": {"model_id": "llama-3.3-70b-versatile", "input_price_per_1m": 0.59, "output_price_per_1m": 0.79, "context_window": 128000},
+        "tier_powerful": {"model_id": "llama-3.3-70b-versatile", "input_price_per_1m": 0.59, "output_price_per_1m": 0.79, "context_window": 128000}
+      }
+    },
+    "mistral": {
+      "name": "Mistral AI",
+      "region": "eu",
+      "base_url": "https://api.mistral.ai",
+      "api_key_env": "MISTRAL_API_KEY",
+      "protocol": "openai",
+      "models": {
+        "tier_fast": {"model_id": "mistral-small-latest", "input_price_per_1m": 0.10, "output_price_per_1m": 0.30, "context_window": 32000},
+        "tier_balanced": {"model_id": "mistral-medium-latest", "input_price_per_1m": 0.40, "output_price_per_1m": 1.20, "context_window": 128000},
+        "tier_powerful": {"model_id": "mistral-large-latest", "input_price_per_1m": 2.00, "output_price_per_1m": 6.00, "context_window": 128000}
+      }
+    },
+    "deepseek": {
+      "name": "DeepSeek",
+      "region": "cn",
+      "base_url": "https://api.deepseek.com",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "protocol": "openai",
+      "models": {
+        "tier_fast": {"model_id": "deepseek-chat", "input_price_per_1m": 0.27, "output_price_per_1m": 1.10, "context_window": 64000},
+        "tier_balanced": {"model_id": "deepseek-chat", "input_price_per_1m": 0.27, "output_price_per_1m": 1.10, "context_window": 64000},
+        "tier_powerful": {"model_id": "deepseek-reasoner", "input_price_per_1m": 0.55, "output_price_per_1m": 2.19, "context_window": 64000}
+      }
+    },
+    "qwen": {
+      "name": "Alibaba Qwen",
+      "region": "cn",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode",
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "protocol": "openai",
+      "models": {
+        "tier_fast": {"model_id": "qwen-turbo", "input_price_per_1m": 0.05, "output_price_per_1m": 0.20, "context_window": 1000000},
+        "tier_balanced": {"model_id": "qwen-plus", "input_price_per_1m": 0.40, "output_price_per_1m": 1.20, "context_window": 131072},
+        "tier_powerful": {"model_id": "qwen-max", "input_price_per_1m": 1.60, "output_price_per_1m": 6.40, "context_window": 32000}
+      }
+    },
+    "grok": {
+      "name": "xAI Grok",
+      "region": "us",
+      "base_url": "https://api.x.ai",
+      "api_key_env": "XAI_API_KEY",
+      "protocol": "openai",
+      "models": {
+        "tier_fast": {"model_id": "grok-4.1-fast", "input_price_per_1m": 0.20, "output_price_per_1m": 0.50, "context_window": 2000000},
+        "tier_balanced": {"model_id": "grok-4.3", "input_price_per_1m": 1.25, "output_price_per_1m": 2.50, "context_window": 1000000},
+        "tier_powerful": {"model_id": "grok-4", "input_price_per_1m": 3.00, "output_price_per_1m": 15.00, "context_window": 131072}
+      }
+    }
+  }
+}

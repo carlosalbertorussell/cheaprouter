@@ -5,8 +5,9 @@ BYOK model: API keys are supplied per-request by the caller, not stored
 server-side. resolve_api_key() checks the user-supplied dict first, then
 falls back to environment variables for local development convenience.
 
-All pricing is in USD per 1M tokens. Prices should be verified periodically
-against official provider pricing pages as they change frequently.
+Pricing and model metadata are loaded from prices.json via pricing_table.py,
+which enforces a staleness guard (S4a). This module builds the PROVIDERS registry
+from that validated table; the public surface is unchanged.
 
 Capability tiers map semantically equivalent models across providers:
   - tier_fast:     Small/fast models, cheap, good for simple tasks
@@ -82,233 +83,44 @@ def configured_providers(user_keys: dict[str, str]) -> dict[str, ProviderConfig]
     }
 
 
-PROVIDERS: dict[str, ProviderConfig] = {
+# ─── Build the registry from the validated price table (S4a) ──────────────────
+#
+# Prices and model metadata now live in prices.json, loaded and staleness-checked
+# by pricing_table.py. providers.py builds the same PROVIDERS registry it always
+# exposed, so every downstream import (PROVIDERS, resolve_api_key,
+# configured_providers, ModelConfig, ProviderConfig, tier constants,
+# REGION_LATENCY_MS) is unchanged in name and signature. Only the source of the
+# numbers moved — from literals here to the versioned table.
 
-    "anthropic": ProviderConfig(
-        name="Anthropic",
-        region="us",
-        base_url="https://api.anthropic.com",
-        api_key_env="ANTHROPIC_API_KEY",
-        protocol="anthropic",
-        extra_headers={"anthropic-version": "2023-06-01"},
-        models={
-            TIER_FAST: ModelConfig(
-                model_id="claude-haiku-4-5-20251001",
-                input_price_per_1m=0.80,
-                output_price_per_1m=4.00,
-                context_window=200_000,
-            ),
-            TIER_BALANCED: ModelConfig(
-                model_id="claude-sonnet-4-6",
-                input_price_per_1m=3.00,
-                output_price_per_1m=15.00,
-                context_window=200_000,
-            ),
-            TIER_POWERFUL: ModelConfig(
-                model_id="claude-opus-4-6",
-                input_price_per_1m=15.00,
-                output_price_per_1m=75.00,
-                context_window=200_000,
-            ),
-        },
-    ),
+from pricing_table import raw_table
 
-    "openai": ProviderConfig(
-        name="OpenAI",
-        region="us",
-        base_url="https://api.openai.com",
-        api_key_env="OPENAI_API_KEY",
-        protocol="openai",
-        models={
-            TIER_FAST: ModelConfig(
-                model_id="gpt-4o-mini",
-                input_price_per_1m=0.15,
-                output_price_per_1m=0.60,
-                context_window=128_000,
-            ),
-            TIER_BALANCED: ModelConfig(
-                model_id="gpt-4o",
-                input_price_per_1m=2.50,
-                output_price_per_1m=10.00,
-                context_window=128_000,
-            ),
-            TIER_POWERFUL: ModelConfig(
-                model_id="o3",
-                input_price_per_1m=10.00,
-                output_price_per_1m=40.00,
-                context_window=200_000,
-            ),
-        },
-    ),
 
-    "gemini": ProviderConfig(
-        name="Google Gemini",
-        region="us",
-        base_url="https://generativelanguage.googleapis.com",
-        api_key_env="GEMINI_API_KEY",
-        protocol="gemini",
-        models={
-            TIER_FAST: ModelConfig(
-                model_id="gemini-2.0-flash",
-                input_price_per_1m=0.10,
-                output_price_per_1m=0.40,
-                context_window=1_048_576,
-            ),
-            TIER_BALANCED: ModelConfig(
-                model_id="gemini-1.5-pro",
-                input_price_per_1m=1.25,
-                output_price_per_1m=5.00,
-                context_window=2_097_152,
-            ),
-            TIER_POWERFUL: ModelConfig(
-                model_id="gemini-2.5-pro",
-                input_price_per_1m=3.50,
-                output_price_per_1m=14.00,
-                context_window=1_048_576,
-            ),
-        },
-    ),
+def _build_providers() -> dict[str, ProviderConfig]:
+    table = raw_table()
+    registry: dict[str, ProviderConfig] = {}
+    for pid, p in table["providers"].items():
+        models = {
+            tier: ModelConfig(
+                model_id=m["model_id"],
+                input_price_per_1m=float(m["input_price_per_1m"]),
+                output_price_per_1m=float(m["output_price_per_1m"]),
+                context_window=int(m["context_window"]),
+            )
+            for tier, m in p["models"].items()
+        }
+        registry[pid] = ProviderConfig(
+            name=p["name"],
+            region=p["region"],
+            base_url=p["base_url"],
+            api_key_env=p["api_key_env"],
+            protocol=p["protocol"],
+            models=models,
+            extra_headers=p.get("extra_headers", {}),
+        )
+    return registry
 
-    "groq": ProviderConfig(
-        name="Groq",
-        region="us",
-        base_url="https://api.groq.com/openai",
-        api_key_env="GROQ_API_KEY",
-        protocol="openai",
-        models={
-            TIER_FAST: ModelConfig(
-                model_id="llama-3.1-8b-instant",
-                input_price_per_1m=0.05,
-                output_price_per_1m=0.08,
-                context_window=128_000,
-            ),
-            TIER_BALANCED: ModelConfig(
-                model_id="llama-3.3-70b-versatile",
-                input_price_per_1m=0.59,
-                output_price_per_1m=0.79,
-                context_window=128_000,
-            ),
-            TIER_POWERFUL: ModelConfig(
-                model_id="llama-3.3-70b-versatile",
-                input_price_per_1m=0.59,
-                output_price_per_1m=0.79,
-                context_window=128_000,
-            ),
-        },
-    ),
 
-    "mistral": ProviderConfig(
-        name="Mistral AI",
-        region="eu",
-        base_url="https://api.mistral.ai",
-        api_key_env="MISTRAL_API_KEY",
-        protocol="openai",
-        models={
-            TIER_FAST: ModelConfig(
-                model_id="mistral-small-latest",
-                input_price_per_1m=0.10,
-                output_price_per_1m=0.30,
-                context_window=32_000,
-            ),
-            TIER_BALANCED: ModelConfig(
-                model_id="mistral-medium-latest",
-                input_price_per_1m=0.40,
-                output_price_per_1m=1.20,
-                context_window=128_000,
-            ),
-            TIER_POWERFUL: ModelConfig(
-                model_id="mistral-large-latest",
-                input_price_per_1m=2.00,
-                output_price_per_1m=6.00,
-                context_window=128_000,
-            ),
-        },
-    ),
-
-    "deepseek": ProviderConfig(
-        name="DeepSeek",
-        region="cn",
-        base_url="https://api.deepseek.com",
-        api_key_env="DEEPSEEK_API_KEY",
-        protocol="openai",
-        models={
-            TIER_FAST: ModelConfig(
-                model_id="deepseek-chat",
-                input_price_per_1m=0.27,
-                output_price_per_1m=1.10,
-                context_window=64_000,
-            ),
-            TIER_BALANCED: ModelConfig(
-                model_id="deepseek-chat",
-                input_price_per_1m=0.27,
-                output_price_per_1m=1.10,
-                context_window=64_000,
-            ),
-            TIER_POWERFUL: ModelConfig(
-                model_id="deepseek-reasoner",
-                input_price_per_1m=0.55,
-                output_price_per_1m=2.19,
-                context_window=64_000,
-            ),
-        },
-    ),
-
-    "qwen": ProviderConfig(
-        name="Alibaba Qwen",
-        region="cn",
-        base_url="https://dashscope.aliyuncs.com/compatible-mode",
-        api_key_env="DASHSCOPE_API_KEY",
-        protocol="openai",
-        models={
-            TIER_FAST: ModelConfig(
-                model_id="qwen-turbo",
-                input_price_per_1m=0.05,
-                output_price_per_1m=0.20,
-                context_window=1_000_000,
-            ),
-            TIER_BALANCED: ModelConfig(
-                model_id="qwen-plus",
-                input_price_per_1m=0.40,
-                output_price_per_1m=1.20,
-                context_window=131_072,
-            ),
-            TIER_POWERFUL: ModelConfig(
-                model_id="qwen-max",
-                input_price_per_1m=1.60,
-                output_price_per_1m=6.40,
-                context_window=32_000,
-            ),
-        },
-    ),
-
-    "grok": ProviderConfig(
-        name="xAI Grok",
-        region="us",
-        base_url="https://api.x.ai",
-        api_key_env="XAI_API_KEY",
-        protocol="openai",
-        models={
-            TIER_FAST: ModelConfig(
-                model_id="grok-4.1-fast",
-                input_price_per_1m=0.20,
-                output_price_per_1m=0.50,
-                context_window=2_000_000,
-            ),
-            TIER_BALANCED: ModelConfig(
-                model_id="grok-4.3",
-                input_price_per_1m=1.25,
-                output_price_per_1m=2.50,
-                context_window=1_000_000,
-            ),
-            TIER_POWERFUL: ModelConfig(
-                model_id="grok-4",
-                input_price_per_1m=3.00,
-                output_price_per_1m=15.00,
-                context_window=131_072,
-            ),
-        },
-    ),
-}
+PROVIDERS: dict[str, ProviderConfig] = _build_providers()
 
 
 def get_provider(provider_id: str) -> Optional[ProviderConfig]:

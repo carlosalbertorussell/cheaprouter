@@ -112,9 +112,23 @@ def _ok(text="hi"):
 
 @pytest.fixture
 def isolate(tmp_path, monkeypatch):
+    import json as _j, importlib
+    from datetime import date, timedelta
     monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
     monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
     monkeypatch.setenv("ARBITRAGE_HISTORY_FILE", str(tmp_path / "h.jsonl"))
+    # Fresh-dated copy of the real price table so the S4a staleness guard permits routing.
+    real = _j.loads(open("prices.json").read())
+    real["verified_at"] = (date.today() - timedelta(days=1)).isoformat()
+    pf = tmp_path / "prices.json"
+    pf.write_text(_j.dumps(real))
+    monkeypatch.setenv("ARBITRAGE_PRICES_FILE", str(pf))
+    monkeypatch.delenv("ARBITRAGE_ALLOW_STALE_PRICES", raising=False)
+    import pricing_table, providers, server as srv
+    importlib.reload(pricing_table); importlib.reload(providers); importlib.reload(srv)
+    yield
+    monkeypatch.delenv("ARBITRAGE_PRICES_FILE", raising=False)
+    importlib.reload(pricing_table); importlib.reload(providers); importlib.reload(srv)
 
 
 def _run(params):

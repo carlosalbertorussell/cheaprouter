@@ -165,7 +165,9 @@ as of mid-2025. Prices change frequently — verify against official pricing pag
 ```
 cheaprouter/
 ├── server.py        — FastMCP server, all tool definitions
-├── providers.py     — Provider registry: models, pricing, regions, BYOK key resolution
+├── providers.py     — Provider registry (built from prices.json), regions, BYOK key resolution
+├── pricing_table.py — Price-table loader + staleness guard
+├── prices.json      — Versioned price table with provenance (verified_at, max_age_days)
 ├── pricing.py       — Cost calculation and comparison tables
 ├── router.py        — Routing decision engine
 ├── client.py        — Async API client (Anthropic / OpenAI-compat / Gemini)

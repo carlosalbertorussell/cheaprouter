@@ -368,9 +368,22 @@ Providers are selected using the following priority order:
 
 ## Pricing Notes
 
-Token prices are embedded in the server and reflect approximate list prices as of
-mid-2025. LLM pricing changes frequently. Verify current rates before making
-budget-sensitive decisions:
+Token prices live in `prices.json` with provenance: a `verified_at` date and a
+`max_age_days` limit. cheaprouter guards against routing on stale prices:
+
+- **Fresh table:** routing and cost estimation work normally. Every response
+  carries a `price_table` block (`verified_at`, `age_days`, `stale`).
+- **Stale table** (older than `max_age_days`): `arbitrage_route_completion` and
+  `arbitrage_estimate_cost` **refuse** with a `price_table_stale` error, because a
+  savings figure computed from stale prices can't be trusted.
+  `arbitrage_get_pricing` and `arbitrage_provider_status` still return data behind
+  a prominent warning — inspecting a stale table is fine; routing on one blindly
+  is not.
+- **Override:** set `ARBITRAGE_ALLOW_STALE_PRICES=1` to downgrade the refusal to a
+  warning field and proceed anyway.
+
+To refresh prices: verify current rates against the provider pages below, update
+the numbers in `prices.json`, and set `verified_at` to today's date.
 
 - Anthropic: anthropic.com/pricing
 - OpenAI: openai.com/pricing
@@ -379,6 +392,7 @@ budget-sensitive decisions:
 - Mistral: mistral.ai/technology
 - DeepSeek: api-docs.deepseek.com/quick_start/pricing
 - Alibaba Qwen: alibabacloud.com/help/en/model-studio/models
+- xAI Grok: no official pricing page recorded; verify at console.x.ai
 
 ---
 
