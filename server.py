@@ -165,6 +165,11 @@ class CountTokensInput(BaseModel):
     system_prompt: Optional[str] = Field(None, description="Optional system prompt to include in the count.")
 
 
+class CheckPriceDriftInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    propose: bool = Field(False, description="If True, also return a candidate updated price table applying the detected drifts (for human review — not written to disk, verified_at not advanced).")
+
+
 # ─── Tools ────────────────────────────────────────────────────────────────────
 
 def _stale_price_refusal() -> Optional[str]:
@@ -733,6 +738,50 @@ async def arbitrage_count_tokens(params: CountTokensInput) -> str:
     total = count_message_tokens(params.messages, params.system_prompt)
     method = "tiktoken:o200k_base" if _get_encoder() is not None else "heuristic"
     return json.dumps({"input_tokens": total, "method": method}, indent=2)
+
+
+@mcp.tool(
+    name="arbitrage_check_price_drift",
+    annotations={
+        "title": "Check Price Drift",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def arbitrage_check_price_drift(params: CheckPriceDriftInput) -> str:
+    """
+    Compare fetchable provider prices against the current price table and report
+    drift. This is the S4b refresh path: it fetches prices for providers that
+    declare a programmatic source, flags any that differ, and lists the providers
+    that still need manual human verification.
+
+    It never writes prices.json and never advances verified_at — it proposes
+    changes for review. To clear the staleness guard, a human verifies the
+    proposed prices against each provider's pricing page, edits prices.json, and
+    sets verified_at to today. No price is ever invented or silently accepted.
+
+    Args:
+        params (CheckPriceDriftInput):
+            - propose (bool): also return a candidate updated table applying the
+              detected drifts (for review only)
+
+    Returns:
+        str: JSON drift report — per-provider status (match/drift/fetch_failed/
+             manual), summary counts, and optionally a candidate table.
+    """
+    from refresh import check_drift, propose_updated_table
+    report = check_drift()
+    out = {"report": report}
+    if params.propose and report["any_drift"]:
+        out["candidate_table"] = propose_updated_table(report)
+        out["candidate_note"] = (
+            "This candidate is for review only. It has NOT been written to disk and "
+            "verified_at was NOT advanced. Verify each changed price against the "
+            "provider's pricing page, then edit prices.json and set verified_at."
+        )
+    return json.dumps(out, indent=2)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

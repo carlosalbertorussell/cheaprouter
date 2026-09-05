@@ -342,6 +342,29 @@ or `heuristic`).
 
 ---
 
+### `arbitrage_check_price_drift`
+
+Compare fetchable provider prices against the current price table and report
+drift. This is the refresh path for clearing the staleness guard: it fetches
+prices for providers that declare a programmatic source, flags any that differ,
+and lists the providers that still need manual human verification.
+
+It **never writes `prices.json` and never advances `verified_at`** — it proposes
+changes for review. To actually clear the guard, a human verifies the proposed
+prices against each provider's pricing page, edits `prices.json`, and sets
+`verified_at` to today. No price is ever invented or silently accepted.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `propose` | boolean | — | `false` | Also return a candidate updated table applying detected drifts (review only) |
+
+**Returns:** JSON drift report — per-provider status (`match` / `drift` /
+`fetch_failed` / `manual`), summary counts, and optionally a candidate table.
+
+---
+
 ## Sessions & spend tracking
 
 cheaprouter never holds your identity. To track your own spend, pass a `session`
