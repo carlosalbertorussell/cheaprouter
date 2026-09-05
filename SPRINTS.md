@@ -24,7 +24,7 @@ no data to build budget alerts on. This is the load-bearing task for monetizatio
 
 **Scope:**
 - [x] S1.1 — Pluggable history backend: abstract `history.py` behind a storage interface (JSONL local / external store cloud) so the `/tmp` reset stops losing data
-- [x] S1.2 — Persistent store integration (Supabase — reuse the pattern from PayBridge/AVM); schema: timestamp, provider, tier, region, token counts, cost, latency, savings — **never keys, never content**
+- [x] S1.2 — Persistent store integration (Upstash Redis over REST); schema: timestamp, provider, tier, region, token counts, cost, latency, savings — **never keys, never content**
 - [x] S1.3 — Per-session attribution: a lightweight opaque session token so a user can query *their* spend without the server holding identity (BYOK-consistent)
 - [x] S1.4 — New tool `arbitrage_spend_report`: spend by provider, by tier, by day; total saved vs. baseline; date-range filter
 - [x] S1.5 — Budget alerts: `arbitrage_set_budget` + threshold check surfaced in route_completion responses ("you've used 80% of your $X monthly budget")
@@ -34,10 +34,10 @@ no data to build budget alerts on. This is the load-bearing task for monetizatio
 **Invariants (check before close):**
 - **A** — No API keys or message content in the persistent store, verified by test
 - **B** — Session tokens are opaque and hold no PII; a user cannot query another's spend
-- **C** — Local stdio mode still works with JSONL (no Supabase dependency forced on self-hosters)
+- **C** — Local stdio mode still works with JSONL (no cloud dependency forced on self-hosters)
 - **D** — CHANGELOG updated under [Unreleased]; MCPIZE_DOCS reflects new tools
 
-**Closed 2026-09-04** — storage backend abstraction (Supabase/JSONL), opaque session attribution, `arbitrage_spend_report` + `arbitrage_set_budget` tools, 17 new tests. All four invariants verified; response-content preview removed from the store (invariant A fix).
+**Closed 2026-09-04** — storage backend abstraction (Upstash/JSONL), opaque session attribution, `arbitrage_spend_report` + `arbitrage_set_budget` tools, 17 new tests. All four invariants verified; response-content preview removed from the store (invariant A fix).
 
 </details>
 
@@ -120,4 +120,4 @@ Prioritized. Top of list = next candidate after S1. Each is a sprint-sized unit.
 
 ## Closed
 
-- **S1 — Spend Analytics** (2026-09-04) — durable session-scoped spend tracking, spend report + budget tools, pluggable Supabase/JSONL backend. Foundation of the Pro tier. Full detail in the collapsed block under Active.
+- **S1 — Spend Analytics** (2026-09-04) — durable session-scoped spend tracking, spend report + budget tools, pluggable Upstash/JSONL backend. Foundation of the Pro tier. Full detail in the collapsed block under Active.

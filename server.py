@@ -499,7 +499,7 @@ async def arbitrage_spend_report(params: SpendReportInput) -> str:
     most expensive alternative at each routing decision.
 
     Pass a `session` token to scope the report to your own spend. Requires the
-    persistent store (Supabase) to be useful across redeploys; with local JSONL
+    persistent store (Upstash) to be useful across redeploys; with local JSONL
     it reflects only the current container's history.
 
     Args:

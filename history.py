@@ -1,7 +1,7 @@
 """
 Routing history + spend analytics for cheaprouter (S1).
 
-Records go through a pluggable storage backend (storage.py): Supabase when
+Records go through a pluggable storage backend (storage.py): Upstash Redis when
 configured, JSONL otherwise. Every record is privacy-clean by construction —
 routing metadata only, never keys, never message content (Invariant A).
 

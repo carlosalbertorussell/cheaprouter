@@ -14,7 +14,7 @@ pricing.py    — cost calculation and comparison-table rendering
 providers.py  — provider registry: models, per-tier pricing, regions, key resolution
 client.py     — async HTTP client; three wire protocols
 history.py    — spend analytics: sessions, spend report, budgets (over storage.py)
-storage.py    — pluggable history backend (Supabase when configured, JSONL fallback)
+storage.py    — pluggable history backend (Upstash Redis when configured, JSONL fallback)
 ```
 
 ## Request flow: `arbitrage_route_completion`
