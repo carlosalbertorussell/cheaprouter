@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **S9 accurate token counting.** Pre-flight input-token counts now use a real tokenizer (tiktoken `o200k_base`) instead of the crude `chars/4` estimate, so the cost ranking that drives routing rests on accurate volume. Falls back to an improved word/char heuristic if tiktoken is unavailable (still far better than `chars/4`, and handles code and CJK). New `arbitrage_count_tokens` tool to preview a request's size.
+
+### Changed
+- `arbitrage_route_completion` counts input tokens with the real tokenizer rather than `chars/4`, correcting cost comparisons for code, CJK, and other content that the flat divisor mis-estimated.
+
+### Added
 - **S2 automatic failover.** On a transient error (429, 5xx, timeout, connection error) `route_completion` now retries the next provider in ranked order, up to `max_failover` times (default 2). Non-transient errors (bad key, bad request) never fail over — they'd fail identically everywhere. Each failed attempt is logged as a failure, which feeds S8 health scoring, so failover and health reinforce each other. The response reports `failed_over` and a per-provider `attempts` list.
 
 ### Added

@@ -40,6 +40,7 @@ from pricing import estimate_all_providers, format_pricing_table
 from router import route
 from health import provider_health
 from client import call_provider, is_transient_error
+from tokens import count_message_tokens
 from history import (
     log_decision, read_history, history_summary,
     spend_report, set_budget, budget_status,
@@ -155,6 +156,12 @@ class SetBudgetInput(BaseModel):
 class ProviderHealthInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     window: Optional[int] = Field(None, description="How many recent routing records to score over (default 50).", ge=1, le=2000)
+
+
+class CountTokensInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    messages: list[dict] = Field(..., description='Conversation messages: [{"role": "user", "content": "..."}]', min_length=1)
+    system_prompt: Optional[str] = Field(None, description="Optional system prompt to include in the count.")
 
 
 # ─── Tools ────────────────────────────────────────────────────────────────────
@@ -296,10 +303,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         str: JSON with completion text, routing metadata, actual token usage,
              actual cost, and savings vs. most expensive alternative.
     """
-    total_chars = sum(len(m.get("content", "")) for m in params.messages)
-    if params.system_prompt:
-        total_chars += len(params.system_prompt)
-    estimated_input = max(1, total_chars // 4)
+    estimated_input = count_message_tokens(params.messages, params.system_prompt)
 
     decision = route(
         providers=PROVIDERS,
@@ -644,6 +648,38 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
         },
         "note": "Unhealthy providers are deprioritized in routing, never excluded.",
     }, indent=2)
+
+
+@mcp.tool(
+    name="arbitrage_count_tokens",
+    annotations={
+        "title": "Count Input Tokens",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def arbitrage_count_tokens(params: CountTokensInput) -> str:
+    """
+    Count the input tokens for a set of messages (plus optional system prompt),
+    using the same tokenizer cheaprouter uses for pre-flight cost routing.
+
+    Useful for previewing how large a request is before sending it, or feeding
+    the count into arbitrage_estimate_cost for an exact price comparison.
+
+    Args:
+        params (CountTokensInput):
+            - messages (list[dict]): Conversation messages
+            - system_prompt (str, optional): System prompt to include
+
+    Returns:
+        str: JSON with the total input token count and the counting method in use.
+    """
+    from tokens import _get_encoder
+    total = count_message_tokens(params.messages, params.system_prompt)
+    method = "tiktoken:o200k_base" if _get_encoder() is not None else "heuristic"
+    return json.dumps({"input_tokens": total, "method": method}, indent=2)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

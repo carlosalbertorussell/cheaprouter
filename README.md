@@ -172,6 +172,7 @@ cheaprouter/
 ├── history.py       — spend analytics: sessions, spend report, budgets
 ├── storage.py       — pluggable history backend (Upstash Redis / JSONL)
 ├── health.py        — provider health tracking, deprioritizes failing providers
+├── tokens.py        — accurate input-token counting (tiktoken) for cost routing
 ├── tests/           — pytest suite (pricing, routing, providers, key-leak guard)
 ├── Dockerfile       — container build
 ├── Makefile         — install / test / run shortcuts
