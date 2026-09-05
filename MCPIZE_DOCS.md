@@ -253,8 +253,8 @@ view for tracking cost over time.
 **Returns:** JSON with `spend_by_provider`, `spend_by_tier`, `spend_by_day`, and
 totals for cost and savings.
 
-> **Note:** durable spend across redeploys requires the Supabase backend
-> (`SUPABASE_URL` + `SUPABASE_KEY`). With the local JSONL fallback the report
+> **Note:** durable spend across redeploys requires the Upstash backend
+> (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`). With the local JSONL fallback the report
 > reflects only the current container's history.
 
 ---

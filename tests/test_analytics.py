@@ -9,8 +9,8 @@ from storage import JSONLBackend, build_record
 def local_backend(tmp_path, monkeypatch):
     """Force history.py onto an isolated JSONL file for each test."""
     f = tmp_path / "h.jsonl"
-    monkeypatch.delenv("SUPABASE_URL", raising=False)
-    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
+    monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
     monkeypatch.setenv("ARBITRAGE_HISTORY_FILE", str(f))
     return f
 

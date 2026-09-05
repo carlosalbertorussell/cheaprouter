@@ -3,14 +3,14 @@ Pluggable storage backend for cheaprouter routing history (S1.1).
 
 Two backends, selected automatically at import time:
 
-  - SupabaseBackend  — used when SUPABASE_URL and SUPABASE_KEY are set.
-                       Durable across MCPize redeploys. Records go to the
-                       `routing_history` table.
+  - UpstashBackend   — used when UPSTASH_REDIS_REST_URL and
+                       UPSTASH_REDIS_REST_TOKEN are set. Durable across MCPize
+                       redeploys. Per-session Redis lists over the HTTP REST API.
   - JSONLBackend     — fallback for local/self-hosted use. Appends to the
                        file at ARBITRAGE_HISTORY_FILE (default /tmp).
 
 Both implement the same StorageBackend interface so history.py never needs to
-know which is active. Self-hosters are never forced onto Supabase (Invariant C).
+know which is active. Self-hosters are never forced onto Upstash (Invariant C).
 
 PRIVACY (Invariants A & B): records carry only routing metadata — timestamp,
 provider, tier, region, token counts, cost, latency, savings, success flag, and
@@ -140,62 +140,90 @@ class JSONLBackend:
         return out
 
 
-# ─── Supabase backend (durable cloud store) ───────────────────────────────────
+# ─── Upstash Redis backend (durable serverless store) ─────────────────────────
 
-class SupabaseBackend:
+class UpstashBackend:
     """
-    Minimal Supabase REST (PostgREST) client — no SDK dependency.
-    Table `routing_history` with columns matching ALLOWED_FIELDS.
+    Upstash Redis over its HTTP REST API — no SDK, no connection pooling, which
+    suits MCPize's serverless container model.
+
+    Data model (per-session lists):
+      history:{session}   → Redis list; each element is one JSON record.
+                            LPUSH on write (newest first), LRANGE on read.
+      history:sessions    → Redis set of every session key seen, so an unscoped
+                            read (session=None) can fan out across sessions.
+
+    Session isolation is physical: each session's records live under a separate
+    key, so a scoped read can only ever touch one session's list.
     """
 
-    def __init__(self, url: str, key: str, table: str = "routing_history"):
+    MAX_PER_SESSION = 5000   # cap list length so a session can't grow unbounded
+
+    def __init__(self, url: str, token: str):
         self.base = url.rstrip("/")
-        self.key = key
-        self.table = table
+        self.token = token
 
     @property
     def name(self) -> str:
-        return "supabase"
+        return "upstash"
 
     @property
     def _headers(self) -> dict:
-        return {
-            "apikey": self.key,
-            "Authorization": f"Bearer {self.key}",
-            "Content-Type": "application/json",
-        }
+        return {"Authorization": f"Bearer {self.token}"}
+
+    def _cmd(self, *args) -> Optional[object]:
+        """
+        Run one Redis command via the REST API: POST a JSON array of the command
+        and its arguments. Returns the `result` field, or None on any failure —
+        history is best-effort and must never break routing.
+        """
+        try:
+            with httpx.Client(timeout=10.0) as c:
+                r = c.post(self.base, headers=self._headers, json=list(args))
+                r.raise_for_status()
+                return r.json().get("result")
+        except Exception:
+            return None
 
     def write(self, record: dict) -> None:
         rec = sanitize(record)
-        url = f"{self.base}/rest/v1/{self.table}"
-        try:
-            with httpx.Client(timeout=10.0) as c:
-                r = c.post(url, headers={**self._headers, "Prefer": "return=minimal"}, json=rec)
-                r.raise_for_status()
-        except Exception:
-            # History is best-effort — a store failure must never break routing.
-            pass
+        session = rec.get("session", "anon")
+        key = f"history:{session}"
+        payload = json.dumps(rec)
+        # newest-first list, trim to cap, register the session key in the index
+        self._cmd("LPUSH", key, payload)
+        self._cmd("LTRIM", key, 0, self.MAX_PER_SESSION - 1)
+        self._cmd("SADD", "history:sessions", key)
 
     def read(self, session: Optional[str], limit: int) -> list[dict]:
-        url = f"{self.base}/rest/v1/{self.table}"
-        params = {"select": "*", "order": "timestamp.desc", "limit": str(limit)}
         if session is not None:
-            params["session"] = f"eq.{session}"
-        try:
-            with httpx.Client(timeout=10.0) as c:
-                r = c.get(url, headers=self._headers, params=params)
-                r.raise_for_status()
-                return r.json()
-        except Exception:
-            return []
+            return self._read_key(f"history:{session}", limit)
+
+        # Unscoped: fan out across all known session lists, then merge newest-first.
+        keys = self._cmd("SMEMBERS", "history:sessions") or []
+        merged: list[dict] = []
+        for key in keys:
+            merged.extend(self._read_key(key, limit))
+        merged.sort(key=lambda r: r.get("timestamp") or "", reverse=True)
+        return merged[:limit]
+
+    def _read_key(self, key: str, limit: int) -> list[dict]:
+        raw = self._cmd("LRANGE", key, 0, limit - 1) or []
+        out = []
+        for item in raw:
+            try:
+                out.append(json.loads(item))
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return out
 
 
 # ─── Backend selection ────────────────────────────────────────────────────────
 
 def get_backend() -> StorageBackend:
-    """Supabase when configured, else JSONL. Called fresh so tests can monkeypatch env."""
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
-    if url and key:
-        return SupabaseBackend(url, key)
+    """Upstash when configured, else JSONL. Called fresh so tests can monkeypatch env."""
+    url = os.getenv("UPSTASH_REDIS_REST_URL")
+    token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+    if url and token:
+        return UpstashBackend(url, token)
     return JSONLBackend()
