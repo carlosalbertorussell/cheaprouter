@@ -319,6 +319,29 @@ of currently unhealthy providers, and the thresholds in effect.
 
 ---
 
+### `arbitrage_count_tokens`
+
+Count the input tokens for a set of messages (plus optional system prompt), using
+the same tokenizer cheaprouter uses for pre-flight cost routing. Handy for
+previewing request size, or feeding an exact count into `arbitrage_estimate_cost`.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `messages` | array | ✅ | — | Conversation messages |
+| `system_prompt` | string | — | `null` | System prompt to include in the count |
+
+**Example:**
+```json
+{ "messages": [{ "role": "user", "content": "Summarise this in one line." }] }
+```
+
+**Returns:** JSON with `input_tokens` and the `method` used (`tiktoken:o200k_base`
+or `heuristic`).
+
+---
+
 ## Sessions & spend tracking
 
 cheaprouter never holds your identity. To track your own spend, pass a `session`

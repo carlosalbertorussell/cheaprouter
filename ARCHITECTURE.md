@@ -16,6 +16,7 @@ client.py     — async HTTP client; three wire protocols; transient-error class
 history.py    — spend analytics: sessions, spend report, budgets (over storage.py)
 storage.py    — pluggable history backend (Upstash Redis when configured, JSONL fallback)
 health.py     — per-provider health from history; deprioritizes failing providers (S8)
+tokens.py     — accurate input-token counting for cost routing (tiktoken, S9)
 ```
 
 ## Request flow: `arbitrage_route_completion`
@@ -24,7 +25,7 @@ health.py     — per-provider health from history; deprioritizes failing provid
 caller (MCP client)
    │  messages + api_keys + tier + constraints
    ▼
-server.py  ── estimates input tokens (chars/4)
+server.py  ── counts input tokens (tokens.py: tiktoken, S9)
    │
    ▼
 router.py  ── estimate_all_providers()  → ranks by cost

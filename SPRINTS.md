@@ -63,11 +63,6 @@ Prioritized. Top of list = next candidate after S1. Each is a sprint-sized unit.
   streaming variant so real completion workloads get token-by-token output. Biggest
   functional gap for production use.
 
-- **S9 — Accurate token counting.** Input is estimated at chars/4 today, which skews the
-  pre-flight cost ranking. Use each provider's real tokenizer so the routing decision is
-  accurate rather than approximate. Small change, direct correctness gain on the core
-  cost comparison.
-
 - **S10 — Semantic response cache.** A cache *in front of* routing: if the same or a
   near-identical prompt was answered recently, return the cached response and skip the API
   call entirely — the cheapest token is the one never spent. Largest potential saving of
@@ -110,6 +105,7 @@ Prioritized. Top of list = next candidate after S1. Each is a sprint-sized unit.
 
 ## Closed
 
+- **S9 — Accurate token counting** (2026-09-05) — pre-flight input counts use tiktoken (o200k_base) instead of chars/4, with an improved heuristic fallback; corrects the cost ranking for code/CJK/etc. New arbitrage_count_tokens tool. tokens.py, tiktoken dep (ceiling-pinned). 11 tests.
 - **S2 — Automatic failover** (2026-09-05) — on a transient error (429/5xx/timeout) route_completion retries the next provider in ranked order, up to max_failover (default 2). Non-transient errors (bad key/request) never fail over. Each failed attempt feeds S8 health. Response reports failed_over + attempts. router exposes ranked_pool; client has is_transient_error. 18 tests. Completes the health/failover pair with S8.
 - **S8 — Provider health tracking** (2026-09-05) — recent failures deprioritize a provider in routing (behind healthy providers of similar price, never excluded; an all-unhealthy pool still returns the cheapest). New `arbitrage_provider_health` tool; `route_completion` gains a `health_aware` toggle and reports `deprioritized_providers`. health.py reads history metadata only. 10 tests. Precursor to S2 failover.
 - **S1 — Spend Analytics** (2026-09-04) — durable session-scoped spend tracking, spend report + budget tools, pluggable Upstash/JSONL backend. Foundation of the Pro tier. Full detail in the collapsed block under Active.
