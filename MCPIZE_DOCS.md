@@ -154,6 +154,8 @@ core tool — it selects the winner and makes the actual API call on your behalf
 | `excluded_providers` | array | — | `[]` | Provider IDs to skip |
 | `allowed_regions` | array | — | `null` | Restrict to these regions |
 | `estimated_output_tokens` | integer | — | 500 | Used for pre-flight cost routing |
+| `health_aware` | boolean | — | `true` | Deprioritize recently-failing providers (never excludes) |
+| `max_failover` | integer | — | 2 | On a transient error (429/5xx/timeout), how many further providers to try in ranked order. 0 disables. |
 
 **Example:**
 ```json
@@ -177,6 +179,14 @@ core tool — it selects the winner and makes the actual API call on your behalf
 **Returns:** JSON with the completion text, routing metadata (which provider was
 selected, model, region), actual token usage, actual cost, and savings vs. the
 most expensive eligible alternative.
+
+**Failover:** if the first-choice provider returns a transient error (rate limit,
+server error, or timeout), cheaprouter automatically retries the next provider in
+ranked order, up to `max_failover` times. Non-transient errors (bad key, malformed
+request) stop immediately, since they'd fail the same way everywhere. The response
+includes `failed_over` (bool) and an `attempts` list showing each provider tried
+and its outcome. Every failed attempt also feeds provider health tracking, so a
+provider having a bad spell gets deprioritized on subsequent calls.
 
 ---
 
@@ -329,6 +339,7 @@ Providers are selected using the following priority order:
 3. **Latency** — when `latency_sensitive: true`, providers with latency above 300ms are excluded (primarily affects DeepSeek and Qwen from outside Asia)
 4. **Region** — `allowed_regions` restricts the eligible pool to specific regions; useful for data residency requirements
 5. **Health** — when `health_aware: true` (default), providers failing more than half their recent calls are deprioritized (moved behind healthy providers of similar price). They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. `route_completion` reports any `deprioritized_providers` in its response.
+6. **Failover** — if the chosen provider returns a transient error, routing walks down the ranked pool to the next provider automatically (up to `max_failover`). This uses the same ordering health produces, so failover prefers healthy providers first.
 
 ---
 

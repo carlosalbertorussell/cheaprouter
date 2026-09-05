@@ -23,6 +23,29 @@ from providers import ProviderConfig, ModelConfig
 REQUEST_TIMEOUT = 120.0
 
 
+def is_transient_error(exc: Exception) -> bool:
+    """
+    True if an exception is worth failing over to another provider.
+
+    Transient (retry on next provider): rate limits (429), server errors (5xx),
+    timeouts, and connection errors — these are provider-specific and a different
+    provider may well succeed.
+
+    Non-transient (fail immediately, no failover): auth errors (401/403) and bad
+    requests (400/404/422) — these reflect the key or the request itself and would
+    fail identically everywhere, so retrying just wastes calls.
+    """
+    if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError,
+                        httpx.RemoteProtocolError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code == 429 or 500 <= code <= 599:
+            return True
+        return False   # 4xx other than 429 → not transient
+    return False       # unknown error type → don't fail over blindly
+
+
 @dataclass
 class CompletionResult:
     text: str

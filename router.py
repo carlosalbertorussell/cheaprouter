@@ -40,6 +40,7 @@ class RoutingDecision:
     tier: str
     latency_sensitive: bool
     deprioritized: list = None    # provider_ids sunk to the back for poor health (S8)
+    ranked_pool: list = None      # eligible provider_ids in routing order — the failover sequence (S2)
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +51,7 @@ class RoutingDecision:
             "tier": self.tier,
             "latency_sensitive": self.latency_sensitive,
             "deprioritized": self.deprioritized or [],
+            "ranked_pool": self.ranked_pool or [],
         }
 
 
@@ -157,6 +159,7 @@ def route(
         latency_sensitive=latency_sensitive,
     )
     decision.deprioritized = deprioritized
+    decision.ranked_pool = [e.provider_id for e in pool]
     return decision
 
 
