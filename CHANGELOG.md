@@ -8,9 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **S4a price-table staleness guard.** Provider prices moved from hardcoded literals in `providers.py` into a versioned `prices.json` with provenance (`verified_at`, `max_age_days`, source URLs). New `pricing_table.py` loads and validates it and **fails loudly** on a missing/malformed file — no silent default. Every tool response carries a `price_table` block. When prices are stale (older than `max_age_days`), `arbitrage_route_completion` and `arbitrage_estimate_cost` **refuse** with a structured error; `arbitrage_get_pricing` and `arbitrage_provider_status` still return data behind a warning. `ARBITRAGE_ALLOW_STALE_PRICES=1` downgrades refusal to a warning. New `scripts/check_prices.py`, wired into CI as a non-blocking `price-freshness` check plus a weekly scheduled reminder.
 - **S9 accurate token counting.** Pre-flight input-token counts now use a real tokenizer (tiktoken `o200k_base`) instead of the crude `chars/4` estimate, so the cost ranking that drives routing rests on accurate volume. Falls back to an improved word/char heuristic if tiktoken is unavailable (still far better than `chars/4`, and handles code and CJK). New `arbitrage_count_tokens` tool to preview a request's size.
 
 ### Changed
+- **BREAKING (deploy):** the committed price table is dated 2025-06-30 and is well past its 45-day limit, so on deploy the server **refuses routing and cost estimation until prices are re-verified** in `prices.json`. This is intended: a savings figure computed from unverified ~430-day-old prices cannot be defended. Re-verify prices and update `verified_at`, or set `ARBITRAGE_ALLOW_STALE_PRICES=1` to proceed with a warning.
 - `arbitrage_route_completion` counts input tokens with the real tokenizer rather than `chars/4`, correcting cost comparisons for code, CJK, and other content that the flat divisor mis-estimated.
 
 ### Added
