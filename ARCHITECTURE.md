@@ -12,7 +12,7 @@ server.py     — FastMCP server; defines the 5 tools and their input schemas
 router.py     — routing decision engine (price → availability → latency → region)
 pricing.py    — cost calculation and comparison-table rendering
 providers.py  — provider registry: models, per-tier pricing, regions, key resolution
-client.py     — async HTTP client; three wire protocols
+client.py     — async HTTP client; three wire protocols; transient-error classifier for failover (S2)
 history.py    — spend analytics: sessions, spend report, budgets (over storage.py)
 storage.py    — pluggable history backend (Upstash Redis when configured, JSONL fallback)
 health.py     — per-provider health from history; deprioritizes failing providers (S8)

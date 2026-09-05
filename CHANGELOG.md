@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **S2 automatic failover.** On a transient error (429, 5xx, timeout, connection error) `route_completion` now retries the next provider in ranked order, up to `max_failover` times (default 2). Non-transient errors (bad key, bad request) never fail over — they'd fail identically everywhere. Each failed attempt is logged as a failure, which feeds S8 health scoring, so failover and health reinforce each other. The response reports `failed_over` and a per-provider `attempts` list.
+
+### Added
 - **S8 provider health tracking.** Recent routing failures now feed back into routing: a provider failing more than half its recent calls (min 3 samples) is *deprioritized* — moved behind healthy providers of similar price — but never excluded, so a blip can't strand a caller and an all-unhealthy pool still returns the cheapest option. New `arbitrage_provider_health` tool reports success rate, sample count, and healthy flag per provider. `route_completion` gains a `health_aware` toggle (default on) and returns `deprioritized_providers`. Health is read from history metadata only — no keys, no content.
 
 ### Added

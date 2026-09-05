@@ -39,7 +39,7 @@ from providers import PROVIDERS, VALID_TIERS, resolve_api_key
 from pricing import estimate_all_providers, format_pricing_table
 from router import route
 from health import provider_health
-from client import call_provider
+from client import call_provider, is_transient_error
 from history import (
     log_decision, read_history, history_summary,
     spend_report, set_budget, budget_status,
@@ -116,6 +116,7 @@ class RouteCompletionInput(BaseModel):
     estimated_output_tokens: int = Field(500, description="Estimated output tokens for pre-flight cost routing", ge=1, le=500_000)
     session: Optional[str] = Field(None, description="Opaque session token to attribute spend to you. Reused across requests to track your own cumulative spend; never mapped to your identity.")
     health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind healthy providers of similar price, but never excluded. Set False for pure cheapest-first routing.")
+    max_failover: int = Field(2, description="On a transient error (429/5xx/timeout), how many additional providers to try, in ranked order, before giving up. 0 disables failover. Non-transient errors (bad key, bad request) never fail over.", ge=0, le=7)
 
     @field_validator("tier")
     @classmethod
@@ -319,50 +320,97 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
             "known_providers": PROVIDER_IDS,
         }, indent=2)
 
-    winner = decision.winner
-    provider = PROVIDERS[winner.provider_id]
-    model = provider.models[params.tier]
-    api_key = resolve_api_key(winner.provider_id, params.api_keys)
+    # Failover loop (S2): walk the ranked pool in order. On a transient error
+    # (429/5xx/timeout) move to the next provider; on a non-transient error (bad
+    # key/request) stop immediately since it would fail identically everywhere.
+    # Every failed attempt is logged as a failure, which feeds S8 health scoring.
+    ranked = decision.ranked_pool or [decision.winner.provider_id]
+    max_attempts = 1 + max(0, params.max_failover)
+    sequence = ranked[:max_attempts]
 
-    try:
-        completion = await call_provider(
-            provider=provider,
-            model=model,
-            api_key=api_key,
-            messages=params.messages,
-            system_prompt=params.system_prompt,
-            max_tokens=params.max_tokens,
-        )
-    except Exception as exc:
-        error_msg = str(exc)
-        log_decision(decision.to_dict(), session=params.session, error=error_msg)
+    completion = None
+    used = None                 # CostEstimate of the provider that succeeded
+    attempts: list[dict] = []   # per-provider attempt log for the response
+
+    for pid in sequence:
+        est = next((e for e in decision.all_estimates if e.provider_id == pid), None)
+        if est is None:
+            continue
+        provider = PROVIDERS[pid]
+        model = provider.models[params.tier]
+        api_key = resolve_api_key(pid, params.api_keys)
+
+        try:
+            completion = await call_provider(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                messages=params.messages,
+                system_prompt=params.system_prompt,
+                max_tokens=params.max_tokens,
+            )
+            used = est
+            attempts.append({"provider_id": pid, "outcome": "success"})
+            # Log the successful decision, attributed to the provider that worked.
+            success_cost = (
+                (completion.input_tokens_used / 1_000_000) * model.input_price_per_1m
+                + (completion.output_tokens_used / 1_000_000) * model.output_price_per_1m
+            )
+            log_decision(
+                decision_dict={**decision.to_dict(),
+                               "winner": {**decision.to_dict()["winner"],
+                                          "provider_id": pid,
+                                          "provider_name": provider.name,
+                                          "region": provider.region}},
+                session=params.session,
+                actual_input_tokens=completion.input_tokens_used,
+                actual_output_tokens=completion.output_tokens_used,
+                actual_latency_ms=completion.latency_ms,
+                actual_cost_usd=success_cost,
+            )
+            break
+        except Exception as exc:
+            transient = is_transient_error(exc)
+            attempts.append({
+                "provider_id": pid,
+                "outcome": "transient_error" if transient else "error",
+                "error_class": str(exc).split(":")[0][:60],
+            })
+            # Log this provider's failure (feeds S8 health), attributed to it.
+            log_decision(
+                decision_dict={**decision.to_dict(),
+                               "winner": {"provider_id": pid,
+                                          "provider_name": provider.name,
+                                          "region": provider.region,
+                                          "total_cost_usd": est.total_cost_usd}},
+                session=params.session,
+                error=str(exc),
+            )
+            if not transient:
+                break   # non-transient → no point trying other providers
+
+    if completion is None:
         return json.dumps({
-            "error": f"Provider call failed: {error_msg}",
-            "provider_attempted": winner.provider_name,
+            "error": "All attempted providers failed.",
+            "attempts": attempts,
             "routing": decision.to_dict(),
         }, indent=2)
 
+    model = PROVIDERS[used.provider_id].models[params.tier]
     actual_input_cost = (completion.input_tokens_used / 1_000_000) * model.input_price_per_1m
     actual_output_cost = (completion.output_tokens_used / 1_000_000) * model.output_price_per_1m
     actual_total_cost = actual_input_cost + actual_output_cost
 
-    log_decision(
-        decision_dict=decision.to_dict(),
-        session=params.session,
-        actual_input_tokens=completion.input_tokens_used,
-        actual_output_tokens=completion.output_tokens_used,
-        actual_latency_ms=completion.latency_ms,
-        actual_cost_usd=actual_total_cost,
-    )
-
     result = {
         "response": completion.text,
         "routing": {
-            "provider": winner.provider_name,
-            "provider_id": winner.provider_id,
+            "provider": used.provider_name,
+            "provider_id": used.provider_id,
             "model": completion.model_id,
             "tier": params.tier,
-            "region": winner.region,
+            "region": used.region,
+            "failed_over": len(attempts) > 1,
+            "attempts": attempts,
         },
         "cost": {
             "actual_input_tokens": completion.input_tokens_used,
