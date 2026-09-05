@@ -54,10 +54,6 @@ Prioritized. Top of list = next candidate after S1. Each is a sprint-sized unit.
   provider and actually overpay. Add cache-hit modeling to the cost estimate and a
   `cached_input_tokens` hint on requests. Genuinely differentiating — few routers do this.
 
-- **S4b — Live pricing refresh.** (S4a shipped — see Closed.) Build a refresh path
-  (scheduled job or tool) that pulls current pricing where providers expose it
-  programmatically and flags drift for the rest, so the staleness guard clears
-  automatically instead of by hand. Removes the biggest maintenance burden.
 
 - **S5 — Streaming completions.** `arbitrage_route_completion` is blocking. Add a
   streaming variant so real completion workloads get token-by-token output. Biggest
@@ -105,6 +101,7 @@ Prioritized. Top of list = next candidate after S1. Each is a sprint-sized unit.
 
 ## Closed
 
+- **S4b — Price refresh path** (2026-09-05) — refresh.py + arbitrage_check_price_drift compare fetchable prices to the table and report drift (match/drift/fetch_failed/manual); propose_updated_table() builds a review candidate but never writes prices.json or advances verified_at. Per-provider 'refresh' strategy in prices.json (json_api|manual); all manual today (no verified programmatic source — no invented prices). scripts/refresh_prices.py for CI/cron. 9 tests. Clears the S4a guard via reviewed diff, not blind editing.
 - **S4a — Price-table staleness guard** (2026-09-05) — prices moved from hardcoded literals to a versioned prices.json with provenance; pricing_table.py loads/validates (fails loudly, no silent default) and exposes verified_at / age_days / is_stale. Routing + estimation REFUSE when stale (older than max_age_days=45); get_pricing + provider_status warn but still return. ARBITRAGE_ALLOW_STALE_PRICES=1 override. scripts/check_prices.py wired into CI (non-blocking price-freshness job + weekly cron). Every response carries a price_table block. Protects S1's savings figure. 20 tests. NOTE: shipped table is ~432 days old, so the deployed server refuses routing until prices are re-verified — intended, flagged in the PR.
 - **S2 — Automatic failover** (2026-09-05) — on a transient error (429/5xx/timeout) route_completion retries the next provider in ranked order, up to max_failover (default 2). Non-transient errors (bad key/request) never fail over. Each failed attempt feeds S8 health. Response reports failed_over + attempts. router exposes ranked_pool; client has is_transient_error. 18 tests. Completes the health/failover pair with S8.
 - **S8 — Provider health tracking** (2026-09-05) — recent failures deprioritize a provider in routing (behind healthy providers of similar price, never excluded; an all-unhealthy pool still returns the cheapest). New `arbitrage_provider_health` tool; `route_completion` gains a `health_aware` toggle and reports `deprioritized_providers`. health.py reads history metadata only. 10 tests. Precursor to S2 failover.

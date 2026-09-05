@@ -167,6 +167,7 @@ cheaprouter/
 ├── server.py        — FastMCP server, all tool definitions
 ├── providers.py     — Provider registry (built from prices.json), regions, BYOK key resolution
 ├── pricing_table.py — Price-table loader + staleness guard
+├── refresh.py       — Price drift check + refresh proposal (S4b)
 ├── prices.json      — Versioned price table with provenance (verified_at, max_age_days)
 ├── pricing.py       — Cost calculation and comparison tables
 ├── router.py        — Routing decision engine

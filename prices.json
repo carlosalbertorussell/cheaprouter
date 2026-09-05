@@ -25,11 +25,31 @@
       "base_url": "https://api.anthropic.com",
       "api_key_env": "ANTHROPIC_API_KEY",
       "protocol": "anthropic",
-      "extra_headers": {"anthropic-version": "2023-06-01"},
+      "extra_headers": {
+        "anthropic-version": "2023-06-01"
+      },
       "models": {
-        "tier_fast": {"model_id": "claude-haiku-4-5-20251001", "input_price_per_1m": 0.80, "output_price_per_1m": 4.00, "context_window": 200000},
-        "tier_balanced": {"model_id": "claude-sonnet-4-6", "input_price_per_1m": 3.00, "output_price_per_1m": 15.00, "context_window": 200000},
-        "tier_powerful": {"model_id": "claude-opus-4-6", "input_price_per_1m": 15.00, "output_price_per_1m": 75.00, "context_window": 200000}
+        "tier_fast": {
+          "model_id": "claude-haiku-4-5-20251001",
+          "input_price_per_1m": 0.8,
+          "output_price_per_1m": 4.0,
+          "context_window": 200000
+        },
+        "tier_balanced": {
+          "model_id": "claude-sonnet-4-6",
+          "input_price_per_1m": 3.0,
+          "output_price_per_1m": 15.0,
+          "context_window": 200000
+        },
+        "tier_powerful": {
+          "model_id": "claude-opus-4-6",
+          "input_price_per_1m": 15.0,
+          "output_price_per_1m": 75.0,
+          "context_window": 200000
+        }
+      },
+      "refresh": {
+        "strategy": "manual"
       }
     },
     "openai": {
@@ -39,9 +59,27 @@
       "api_key_env": "OPENAI_API_KEY",
       "protocol": "openai",
       "models": {
-        "tier_fast": {"model_id": "gpt-4o-mini", "input_price_per_1m": 0.15, "output_price_per_1m": 0.60, "context_window": 128000},
-        "tier_balanced": {"model_id": "gpt-4o", "input_price_per_1m": 2.50, "output_price_per_1m": 10.00, "context_window": 128000},
-        "tier_powerful": {"model_id": "o3", "input_price_per_1m": 10.00, "output_price_per_1m": 40.00, "context_window": 200000}
+        "tier_fast": {
+          "model_id": "gpt-4o-mini",
+          "input_price_per_1m": 0.15,
+          "output_price_per_1m": 0.6,
+          "context_window": 128000
+        },
+        "tier_balanced": {
+          "model_id": "gpt-4o",
+          "input_price_per_1m": 2.5,
+          "output_price_per_1m": 10.0,
+          "context_window": 128000
+        },
+        "tier_powerful": {
+          "model_id": "o3",
+          "input_price_per_1m": 10.0,
+          "output_price_per_1m": 40.0,
+          "context_window": 200000
+        }
+      },
+      "refresh": {
+        "strategy": "manual"
       }
     },
     "gemini": {
@@ -51,9 +89,27 @@
       "api_key_env": "GEMINI_API_KEY",
       "protocol": "gemini",
       "models": {
-        "tier_fast": {"model_id": "gemini-2.0-flash", "input_price_per_1m": 0.10, "output_price_per_1m": 0.40, "context_window": 1048576},
-        "tier_balanced": {"model_id": "gemini-1.5-pro", "input_price_per_1m": 1.25, "output_price_per_1m": 5.00, "context_window": 2097152},
-        "tier_powerful": {"model_id": "gemini-2.5-pro", "input_price_per_1m": 3.50, "output_price_per_1m": 14.00, "context_window": 1048576}
+        "tier_fast": {
+          "model_id": "gemini-2.0-flash",
+          "input_price_per_1m": 0.1,
+          "output_price_per_1m": 0.4,
+          "context_window": 1048576
+        },
+        "tier_balanced": {
+          "model_id": "gemini-1.5-pro",
+          "input_price_per_1m": 1.25,
+          "output_price_per_1m": 5.0,
+          "context_window": 2097152
+        },
+        "tier_powerful": {
+          "model_id": "gemini-2.5-pro",
+          "input_price_per_1m": 3.5,
+          "output_price_per_1m": 14.0,
+          "context_window": 1048576
+        }
+      },
+      "refresh": {
+        "strategy": "manual"
       }
     },
     "groq": {
@@ -63,9 +119,27 @@
       "api_key_env": "GROQ_API_KEY",
       "protocol": "openai",
       "models": {
-        "tier_fast": {"model_id": "llama-3.1-8b-instant", "input_price_per_1m": 0.05, "output_price_per_1m": 0.08, "context_window": 128000},
-        "tier_balanced": {"model_id": "llama-3.3-70b-versatile", "input_price_per_1m": 0.59, "output_price_per_1m": 0.79, "context_window": 128000},
-        "tier_powerful": {"model_id": "llama-3.3-70b-versatile", "input_price_per_1m": 0.59, "output_price_per_1m": 0.79, "context_window": 128000}
+        "tier_fast": {
+          "model_id": "llama-3.1-8b-instant",
+          "input_price_per_1m": 0.05,
+          "output_price_per_1m": 0.08,
+          "context_window": 128000
+        },
+        "tier_balanced": {
+          "model_id": "llama-3.3-70b-versatile",
+          "input_price_per_1m": 0.59,
+          "output_price_per_1m": 0.79,
+          "context_window": 128000
+        },
+        "tier_powerful": {
+          "model_id": "llama-3.3-70b-versatile",
+          "input_price_per_1m": 0.59,
+          "output_price_per_1m": 0.79,
+          "context_window": 128000
+        }
+      },
+      "refresh": {
+        "strategy": "manual"
       }
     },
     "mistral": {
@@ -75,9 +149,27 @@
       "api_key_env": "MISTRAL_API_KEY",
       "protocol": "openai",
       "models": {
-        "tier_fast": {"model_id": "mistral-small-latest", "input_price_per_1m": 0.10, "output_price_per_1m": 0.30, "context_window": 32000},
-        "tier_balanced": {"model_id": "mistral-medium-latest", "input_price_per_1m": 0.40, "output_price_per_1m": 1.20, "context_window": 128000},
-        "tier_powerful": {"model_id": "mistral-large-latest", "input_price_per_1m": 2.00, "output_price_per_1m": 6.00, "context_window": 128000}
+        "tier_fast": {
+          "model_id": "mistral-small-latest",
+          "input_price_per_1m": 0.1,
+          "output_price_per_1m": 0.3,
+          "context_window": 32000
+        },
+        "tier_balanced": {
+          "model_id": "mistral-medium-latest",
+          "input_price_per_1m": 0.4,
+          "output_price_per_1m": 1.2,
+          "context_window": 128000
+        },
+        "tier_powerful": {
+          "model_id": "mistral-large-latest",
+          "input_price_per_1m": 2.0,
+          "output_price_per_1m": 6.0,
+          "context_window": 128000
+        }
+      },
+      "refresh": {
+        "strategy": "manual"
       }
     },
     "deepseek": {
@@ -87,9 +179,27 @@
       "api_key_env": "DEEPSEEK_API_KEY",
       "protocol": "openai",
       "models": {
-        "tier_fast": {"model_id": "deepseek-chat", "input_price_per_1m": 0.27, "output_price_per_1m": 1.10, "context_window": 64000},
-        "tier_balanced": {"model_id": "deepseek-chat", "input_price_per_1m": 0.27, "output_price_per_1m": 1.10, "context_window": 64000},
-        "tier_powerful": {"model_id": "deepseek-reasoner", "input_price_per_1m": 0.55, "output_price_per_1m": 2.19, "context_window": 64000}
+        "tier_fast": {
+          "model_id": "deepseek-chat",
+          "input_price_per_1m": 0.27,
+          "output_price_per_1m": 1.1,
+          "context_window": 64000
+        },
+        "tier_balanced": {
+          "model_id": "deepseek-chat",
+          "input_price_per_1m": 0.27,
+          "output_price_per_1m": 1.1,
+          "context_window": 64000
+        },
+        "tier_powerful": {
+          "model_id": "deepseek-reasoner",
+          "input_price_per_1m": 0.55,
+          "output_price_per_1m": 2.19,
+          "context_window": 64000
+        }
+      },
+      "refresh": {
+        "strategy": "manual"
       }
     },
     "qwen": {
@@ -99,9 +209,27 @@
       "api_key_env": "DASHSCOPE_API_KEY",
       "protocol": "openai",
       "models": {
-        "tier_fast": {"model_id": "qwen-turbo", "input_price_per_1m": 0.05, "output_price_per_1m": 0.20, "context_window": 1000000},
-        "tier_balanced": {"model_id": "qwen-plus", "input_price_per_1m": 0.40, "output_price_per_1m": 1.20, "context_window": 131072},
-        "tier_powerful": {"model_id": "qwen-max", "input_price_per_1m": 1.60, "output_price_per_1m": 6.40, "context_window": 32000}
+        "tier_fast": {
+          "model_id": "qwen-turbo",
+          "input_price_per_1m": 0.05,
+          "output_price_per_1m": 0.2,
+          "context_window": 1000000
+        },
+        "tier_balanced": {
+          "model_id": "qwen-plus",
+          "input_price_per_1m": 0.4,
+          "output_price_per_1m": 1.2,
+          "context_window": 131072
+        },
+        "tier_powerful": {
+          "model_id": "qwen-max",
+          "input_price_per_1m": 1.6,
+          "output_price_per_1m": 6.4,
+          "context_window": 32000
+        }
+      },
+      "refresh": {
+        "strategy": "manual"
       }
     },
     "grok": {
@@ -111,10 +239,29 @@
       "api_key_env": "XAI_API_KEY",
       "protocol": "openai",
       "models": {
-        "tier_fast": {"model_id": "grok-4.1-fast", "input_price_per_1m": 0.20, "output_price_per_1m": 0.50, "context_window": 2000000},
-        "tier_balanced": {"model_id": "grok-4.3", "input_price_per_1m": 1.25, "output_price_per_1m": 2.50, "context_window": 1000000},
-        "tier_powerful": {"model_id": "grok-4", "input_price_per_1m": 3.00, "output_price_per_1m": 15.00, "context_window": 131072}
+        "tier_fast": {
+          "model_id": "grok-4.1-fast",
+          "input_price_per_1m": 0.2,
+          "output_price_per_1m": 0.5,
+          "context_window": 2000000
+        },
+        "tier_balanced": {
+          "model_id": "grok-4.3",
+          "input_price_per_1m": 1.25,
+          "output_price_per_1m": 2.5,
+          "context_window": 1000000
+        },
+        "tier_powerful": {
+          "model_id": "grok-4",
+          "input_price_per_1m": 3.0,
+          "output_price_per_1m": 15.0,
+          "context_window": 131072
+        }
+      },
+      "refresh": {
+        "strategy": "manual"
       }
     }
-  }
+  },
+  "refresh_note": "Each provider has a 'refresh' block. strategy='manual' means prices must be verified by a human against the provider's pricing_url. strategy='json_api' adds 'url' and 'map' ({tier:{field:[json path]}}) for programmatic drift checks via refresh.check_drift(). The refresh path proposes changes for review; it never writes prices.json or advances verified_at automatically."
 }
