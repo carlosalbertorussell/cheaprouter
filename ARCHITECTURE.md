@@ -15,6 +15,7 @@ providers.py  — provider registry: models, per-tier pricing, regions, key reso
 client.py     — async HTTP client; three wire protocols
 history.py    — spend analytics: sessions, spend report, budgets (over storage.py)
 storage.py    — pluggable history backend (Upstash Redis when configured, JSONL fallback)
+health.py     — per-provider health from history; deprioritizes failing providers (S8)
 ```
 
 ## Request flow: `arbitrage_route_completion`
@@ -62,6 +63,7 @@ providers so callers compare like with like:
 2. **Availability** — providers without a supplied key are excluded
 3. **Latency** — when `latency_sensitive=true`, providers above the threshold (default 300ms) are dropped
 4. **Region** — `allowed_regions` / `BLOCKED_REGIONS` constrain the pool
+5. **Health** (S8) — providers failing recently are sunk behind healthy ones of similar price; never excluded, so a blip can't strand a caller
 
 ## BYOK & privacy invariants
 

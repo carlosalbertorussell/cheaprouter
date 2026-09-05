@@ -281,6 +281,34 @@ budget status, with an alert when you cross 80% or go over.
 
 ---
 
+### `arbitrage_provider_health`
+
+Reports recent health per provider, derived from routing history. For each
+provider seen recently, returns its success rate, how many records that's based
+on, and whether it's currently healthy.
+
+A provider is marked unhealthy only once it has enough recent samples (default 3)
+and its success rate has dropped to or below the threshold (default 0.5). At that
+point routing automatically **deprioritizes** it — moves it behind healthy
+providers of similar price — but never excludes it, so a brief outage can't leave
+you with no provider.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `window` | integer | — | 50 | How many recent records to score over |
+
+**Example:**
+```json
+{ "window": 100 }
+```
+
+**Returns:** JSON mapping `provider_id` to `{score, samples, healthy}`, the list
+of currently unhealthy providers, and the thresholds in effect.
+
+---
+
 ## Sessions & spend tracking
 
 cheaprouter never holds your identity. To track your own spend, pass a `session`
@@ -300,6 +328,7 @@ Providers are selected using the following priority order:
 2. **Key availability** — providers without a supplied API key are excluded
 3. **Latency** — when `latency_sensitive: true`, providers with latency above 300ms are excluded (primarily affects DeepSeek and Qwen from outside Asia)
 4. **Region** — `allowed_regions` restricts the eligible pool to specific regions; useful for data residency requirements
+5. **Health** — when `health_aware: true` (default), providers failing more than half their recent calls are deprioritized (moved behind healthy providers of similar price). They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. `route_completion` reports any `deprioritized_providers` in its response.
 
 ---
 
