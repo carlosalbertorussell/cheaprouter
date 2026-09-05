@@ -28,7 +28,24 @@ jobs:
           pip install pytest pytest-asyncio
 
       - name: Compile check
-        run: python -m py_compile server.py providers.py pricing.py router.py client.py history.py
+        run: python -m py_compile server.py providers.py pricing_table.py pricing.py router.py client.py history.py storage.py health.py
 
       - name: Run tests
         run: python -m pytest tests/ -v
+
+  price-freshness:
+    # Non-blocking: surfaces stale prices as a visible signal without failing the
+    # build or gating merges. A red mark here means "prices need a human", which is
+    # a different signal from "code is broken" (that's the test job above).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check price-table freshness
+        run: python scripts/check_prices.py
