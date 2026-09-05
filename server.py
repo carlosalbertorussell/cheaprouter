@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 from providers import PROVIDERS, VALID_TIERS, resolve_api_key
 from pricing import estimate_all_providers, format_pricing_table
 from router import route
+from health import provider_health
 from client import call_provider
 from history import (
     log_decision, read_history, history_summary,
@@ -114,6 +115,7 @@ class RouteCompletionInput(BaseModel):
     allowed_regions: Optional[list[str]] = Field(None, description="Restrict routing to these regions")
     estimated_output_tokens: int = Field(500, description="Estimated output tokens for pre-flight cost routing", ge=1, le=500_000)
     session: Optional[str] = Field(None, description="Opaque session token to attribute spend to you. Reused across requests to track your own cumulative spend; never mapped to your identity.")
+    health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind healthy providers of similar price, but never excluded. Set False for pure cheapest-first routing.")
 
     @field_validator("tier")
     @classmethod
@@ -147,6 +149,11 @@ class SetBudgetInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     session: str = Field(..., description="Your session token — the budget is scoped to it.")
     monthly_usd: float = Field(..., description="Monthly spend budget in USD.", gt=0)
+
+
+class ProviderHealthInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    window: Optional[int] = Field(None, description="How many recent routing records to score over (default 50).", ge=1, le=2000)
 
 
 # ─── Tools ────────────────────────────────────────────────────────────────────
@@ -302,6 +309,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         latency_sensitive=params.latency_sensitive,
         excluded_providers=params.excluded_providers,
         allowed_regions=params.allowed_regions,
+        health_aware=params.health_aware,
     )
 
     if not decision.winner:
@@ -364,6 +372,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         },
         "latency_ms": completion.latency_ms,
         "excluded_providers": decision.excluded,
+        "deprioritized_providers": decision.deprioritized or [],
     }
 
     # Budget alert (S1.5): if the caller set a budget for this session, surface usage.
@@ -541,6 +550,52 @@ async def arbitrage_set_budget(params: SetBudgetInput) -> str:
     stored = set_budget(params.session, params.monthly_usd)
     status = budget_status(params.session)
     return json.dumps({"budget_set": stored, "current_status": status}, indent=2)
+
+
+@mcp.tool(
+    name="arbitrage_provider_health",
+    annotations={
+        "title": "Provider Health",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
+    """
+    Report recent health per provider, derived from routing history.
+
+    For each provider seen in the recent window, returns its success rate, the
+    number of records scored, and whether it is currently healthy. A provider is
+    marked unhealthy only once it has enough recent samples and its success rate
+    has dropped to or below the threshold — at which point routing automatically
+    deprioritizes it (moves it behind healthy providers, without excluding it).
+
+    Providers absent from the report have no recent history and are treated as
+    healthy by the router.
+
+    Args:
+        params (ProviderHealthInput):
+            - window (int, optional): How many recent records to score (default 50)
+
+    Returns:
+        str: JSON mapping provider_id -> {score, samples, healthy}, plus the
+             thresholds in effect.
+    """
+    from health import HEALTH_MIN_SAMPLES, HEALTH_THRESHOLD, HEALTH_WINDOW
+    snap = provider_health(limit=params.window)
+    unhealthy = [pid for pid, h in snap.items() if not h["healthy"]]
+    return json.dumps({
+        "providers": snap,
+        "unhealthy": unhealthy,
+        "thresholds": {
+            "window": params.window or HEALTH_WINDOW,
+            "min_samples": HEALTH_MIN_SAMPLES,
+            "unhealthy_at_success_rate_below_or_equal": HEALTH_THRESHOLD,
+        },
+        "note": "Unhealthy providers are deprioritized in routing, never excluded.",
+    }, indent=2)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

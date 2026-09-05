@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **S8 provider health tracking.** Recent routing failures now feed back into routing: a provider failing more than half its recent calls (min 3 samples) is *deprioritized* — moved behind healthy providers of similar price — but never excluded, so a blip can't strand a caller and an all-unhealthy pool still returns the cheapest option. New `arbitrage_provider_health` tool reports success rate, sample count, and healthy flag per provider. `route_completion` gains a `health_aware` toggle (default on) and returns `deprioritized_providers`. Health is read from history metadata only — no keys, no content.
+
+### Added
 - **S1 spend analytics (Pro-tier foundation).** Durable, session-scoped spend tracking. New tools `arbitrage_spend_report` (spend by provider/tier/day) and `arbitrage_set_budget` (monthly budget with 80%/over alerts surfaced in route_completion). Pluggable storage backend: Upstash Redis when `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` are set (setup in `docs/upstash-setup.md`), local JSONL otherwise — self-hosters need no cloud dependency. Opaque per-session attribution; the store holds routing metadata only, never keys or content.
 
 ### Changed

@@ -68,11 +68,6 @@ Prioritized. Top of list = next candidate after S1. Each is a sprint-sized unit.
   streaming variant so real completion workloads get token-by-token output. Biggest
   functional gap for production use.
 
-- **S8 — Provider health & error-rate tracking.** `history.py` already logs failures;
-  feed that back into routing so a provider currently throwing errors is automatically
-  deprioritized. Turns the existing log into a live routing signal and is the natural
-  precursor to S2 failover — build alongside it.
-
 - **S9 — Accurate token counting.** Input is estimated at chars/4 today, which skews the
   pre-flight cost ranking. Use each provider's real tokenizer so the routing decision is
   accurate rather than approximate. Small change, direct correctness gain on the core
@@ -120,4 +115,5 @@ Prioritized. Top of list = next candidate after S1. Each is a sprint-sized unit.
 
 ## Closed
 
+- **S8 — Provider health tracking** (2026-09-05) — recent failures deprioritize a provider in routing (behind healthy providers of similar price, never excluded; an all-unhealthy pool still returns the cheapest). New `arbitrage_provider_health` tool; `route_completion` gains a `health_aware` toggle and reports `deprioritized_providers`. health.py reads history metadata only. 10 tests. Precursor to S2 failover.
 - **S1 — Spend Analytics** (2026-09-04) — durable session-scoped spend tracking, spend report + budget tools, pluggable Upstash/JSONL backend. Foundation of the Pro tier. Full detail in the collapsed block under Active.
