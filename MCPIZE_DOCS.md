@@ -348,8 +348,9 @@ or `heuristic`).
 
 Compare fetchable provider prices against the current price table and report
 drift. This is the refresh path for clearing the staleness guard: it fetches
-prices for providers that declare a programmatic source, flags any that differ,
-and lists the providers that still need manual human verification.
+prices for the 6 providers wired to the OpenRouter feed (Anthropic, OpenAI, Gemini,
+Mistral, DeepSeek, Grok), flags any that differ, and lists the providers still needing
+manual verification (Groq, Qwen).
 
 It **never writes `prices.json` and never advances `verified_at`** — it proposes
 changes for review. To actually clear the guard, a human verifies the proposed

@@ -62,6 +62,50 @@ def _fetch_json(url: str) -> Optional[dict]:
         return None
 
 
+# ─── OpenRouter shared feed (SC2) ─────────────────────────────────────────────
+#
+# OpenRouter (https://openrouter.ai/api/v1/models) exposes one public JSON feed
+# covering hundreds of models — the programmatic price source S4b was built for.
+# Two things make it different from the generic json_api path:
+#   1. ONE endpoint serves ALL providers, so we fetch it once and index by model
+#      id, rather than fetching per-provider.
+#   2. Its prices are PER-TOKEN strings (e.g. "0.0000025"); our table is
+#      per-1M-tokens, so every value is multiplied by 1_000_000.
+# A model opts in with refresh: {"strategy": "openrouter", "ids": {tier: "<or-id>"}}.
+
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+_PER_TOKEN_TO_PER_1M = 1_000_000
+
+
+def _index_openrouter(doc: dict) -> dict[str, dict]:
+    """Index an OpenRouter /models response by model id → pricing dict."""
+    out: dict[str, dict] = {}
+    for m in (doc or {}).get("data", []):
+        mid = m.get("id")
+        if mid:
+            out[mid] = m.get("pricing", {}) or {}
+    return out
+
+
+def _or_price(pricing: dict, key: str) -> Optional[float]:
+    """Pull one OpenRouter price (per-token string) and convert to per-1M float."""
+    raw = pricing.get(key)
+    if raw is None:
+        return None
+    try:
+        return float(raw) * _PER_TOKEN_TO_PER_1M
+    except (TypeError, ValueError):
+        return None
+
+
+# Map our table field → OpenRouter pricing key
+_OR_FIELD_KEYS = {
+    "input_price_per_1m": "prompt",
+    "output_price_per_1m": "completion",
+    "cached_input_price_per_1m": "input_cache_read",
+}
+
+
 def _extract_price(doc: dict, path: list) -> Optional[float]:
     """
     Walk a dotted/keyed path into a fetched JSON doc to pull one price value.
@@ -96,6 +140,17 @@ def check_drift(table: Optional[dict] = None) -> dict:
     t = table or raw_table()
     results: list[ProviderDrift] = []
 
+    # Fetch the OpenRouter feed once if any provider uses the openrouter strategy.
+    _or_index: Optional[dict] = None
+    _or_fetch_failed = False
+    if any((p.get("refresh") or {}).get("strategy") == "openrouter"
+           for p in t["providers"].values()):
+        _or_doc = _fetch_json(OPENROUTER_MODELS_URL)
+        if _or_doc is None:
+            _or_fetch_failed = True
+        else:
+            _or_index = _index_openrouter(_or_doc)
+
     for pid, prov in t["providers"].items():
         refresh = prov.get("refresh") or {"strategy": "manual"}
         strategy = refresh.get("strategy", "manual")
@@ -103,6 +158,51 @@ def check_drift(table: Optional[dict] = None) -> dict:
         if strategy == "manual":
             results.append(ProviderDrift(pid, strategy, "manual",
                            detail="No programmatic source; requires human verification."))
+            continue
+
+        if strategy == "openrouter":
+            if _or_fetch_failed or _or_index is None:
+                results.append(ProviderDrift(pid, strategy, "fetch_failed",
+                               detail=f"Could not fetch or parse {OPENROUTER_MODELS_URL}"))
+                continue
+            ids = refresh.get("ids", {})   # {tier: "<openrouter model id>"}
+            changes = []
+            missing = []
+            for tier, model in prov["models"].items():
+                or_id = ids.get(tier)
+                if not or_id:
+                    continue
+                pricing = _or_index.get(or_id)
+                if pricing is None:
+                    missing.append(or_id)
+                    continue
+                for field_name in ("input_price_per_1m", "output_price_per_1m",
+                                   "cached_input_price_per_1m"):
+                    if field_name not in model:
+                        continue  # e.g. no cache price in our table for this model
+                    fetched = _or_price(pricing, _OR_FIELD_KEYS[field_name])
+                    if fetched is None:
+                        continue
+                    current = float(model[field_name])
+                    # OpenRouter values are already per-1M after conversion; compare
+                    # with a small relative tolerance to avoid float-noise drifts.
+                    if abs(fetched - current) > max(1e-9, 1e-6 * current):
+                        changes.append({"tier": tier, "field": field_name,
+                                        "old": current, "new": round(fetched, 8)})
+            if missing:
+                detail = f"model id(s) not found in feed: {missing}"
+                if changes:
+                    results.append(ProviderDrift(pid, strategy, "drift",
+                                   detail=f"{len(changes)} price(s) differ; " + detail, changes=changes))
+                else:
+                    results.append(ProviderDrift(pid, strategy, "fetch_failed", detail=detail))
+            elif changes:
+                results.append(ProviderDrift(pid, strategy, "drift",
+                               detail=f"{len(changes)} price(s) differ from the table.",
+                               changes=changes))
+            else:
+                results.append(ProviderDrift(pid, strategy, "match",
+                               detail="Fetched prices match the table."))
             continue
 
         if strategy == "json_api":
