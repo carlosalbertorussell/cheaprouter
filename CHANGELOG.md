@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **S5 streaming completions.** `arbitrage_route_completion` gains a `stream` option that consumes the provider's SSE stream (Anthropic + OpenAI-compatible formats, 6 of 8 providers; others fall back to a normal call). Lowers time-to-first-token and reports it as `time_to_first_token_ms`; the full text is still returned as one result. New streaming client layer (`stream_provider`, `stream_supported`). Failover interacts safely: it applies only *before* the first streamed token — a mid-stream error is terminal and never silently retried on another provider (partial output may already be committed).
+
+### Added
 - **S3 prompt-caching awareness.** The cost model now accounts for provider prompt caching: a new `cached_input_tokens` hint on `arbitrage_get_pricing`, `arbitrage_estimate_cost`, and `arbitrage_route_completion` prices cache-hit input tokens at each model's cache-read rate. Anthropic, OpenAI, and DeepSeek carry `cached_input_price_per_1m` in the table; providers without a cache offering bill cached tokens at the full input rate (never wrongly advantaged). On cache-heavy workloads this can flip which provider is cheapest — e.g. DeepSeek's cache-read pricing can beat a nominally cheaper no-cache provider. Estimates report `cached_input_tokens` and `cache_supported`. Cache prices are the same unverified mid-2025 vintage as the rest of the table and inherit the S4a staleness guard.
 
 ### Added

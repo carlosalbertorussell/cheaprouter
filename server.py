@@ -21,6 +21,7 @@ Deploy (MCPize):
 
 import json
 import sys
+import time
 from typing import Optional
 
 try:
@@ -40,7 +41,7 @@ from pricing import estimate_all_providers, format_pricing_table
 from pricing_table import price_table_status, is_stale, age_days, _allow_stale, VERIFIED_AT, MAX_AGE_DAYS
 from router import route
 from health import provider_health
-from client import call_provider, is_transient_error
+from client import call_provider, is_transient_error, stream_provider, stream_supported, CompletionResult
 from tokens import count_message_tokens
 from history import (
     log_decision, read_history, history_summary,
@@ -121,6 +122,7 @@ class RouteCompletionInput(BaseModel):
     allowed_regions: Optional[list[str]] = Field(None, description="Restrict routing to these regions")
     estimated_output_tokens: int = Field(500, description="Estimated output tokens for pre-flight cost routing", ge=1, le=500_000)
     cached_input_tokens: int = Field(0, description=CACHE_DESC, ge=0, le=2_000_000)
+    stream: bool = Field(False, description="Consume the provider's streaming endpoint (S5). Lowers time-to-first-token and reports it; the full text is still returned as one result at the end. Failover applies only before the first streamed token — a mid-stream error is terminal. Only Anthropic and OpenAI-compatible providers can stream; others fall back to a normal call.")
     session: Optional[str] = Field(None, description="Opaque session token to attribute spend to you. Reused across requests to track your own cumulative spend; never mapped to your identity.")
     health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind healthy providers of similar price, but never excluded. Set False for pure cheapest-first routing.")
     max_failover: int = Field(2, description="On a transient error (429/5xx/timeout), how many additional providers to try, in ranked order, before giving up. 0 disables failover. Non-transient errors (bad key, bad request) never fail over.", ge=0, le=7)
@@ -173,6 +175,54 @@ class CountTokensInput(BaseModel):
 class CheckPriceDriftInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     propose: bool = Field(False, description="If True, also return a candidate updated price table applying the detected drifts (for human review — not written to disk, verified_at not advanced).")
+
+
+async def _run_streaming(provider, model, api_key, messages, system_prompt, max_tokens):
+    """
+    Consume a provider's stream into a CompletionResult, tracking time-to-first-token.
+
+    Errors raised BEFORE the first text chunk propagate normally so the caller's
+    failover can classify them. Once any text has arrived, an error is terminal
+    (the caller must not fail over — partial output may already be committed).
+    Returns (CompletionResult, ttft_ms, started) where `started` is True once the
+    first chunk arrived — the caller uses it to decide whether failover is allowed.
+    """
+    t0 = time.monotonic()
+    parts: list[str] = []
+    in_tok = out_tok = 0
+    model_id = model.model_id
+    ttft_ms = None
+    started = False
+
+    agen = stream_provider(provider, model, api_key, messages, system_prompt, max_tokens)
+    try:
+        async for chunk in agen:
+            if chunk.text:
+                if not started:
+                    started = True
+                    ttft_ms = int((time.monotonic() - t0) * 1000)
+                parts.append(chunk.text)
+            if chunk.model_id:
+                model_id = chunk.model_id
+            if chunk.done:
+                in_tok = chunk.input_tokens_used or in_tok
+                out_tok = chunk.output_tokens_used or out_tok
+    except Exception as exc:
+        # Mark whether output had already begun, so the caller can decide if
+        # failover is still safe (it is not, once tokens have been streamed).
+        setattr(exc, "_cheaprouter_stream_started", started)
+        raise
+
+    latency_ms = int((time.monotonic() - t0) * 1000)
+    result = CompletionResult(
+        text="".join(parts),
+        input_tokens_used=in_tok,
+        output_tokens_used=out_tok,
+        latency_ms=latency_ms,
+        model_id=model_id,
+        raw_response={},
+    )
+    return result, (ttft_ms if ttft_ms is not None else latency_ms), started
 
 
 # ─── Tools ────────────────────────────────────────────────────────────────────
@@ -390,6 +440,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
     completion = None
     used = None                 # CostEstimate of the provider that succeeded
     attempts: list[dict] = []   # per-provider attempt log for the response
+    stream_ttft_ms = None       # time-to-first-token, set on a successful stream
 
     for pid in sequence:
         est = next((e for e in decision.all_estimates if e.provider_id == pid), None)
@@ -399,17 +450,25 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         model = provider.models[params.tier]
         api_key = resolve_api_key(pid, params.api_keys)
 
+        use_stream = params.stream and stream_supported(provider.protocol)
         try:
-            completion = await call_provider(
-                provider=provider,
-                model=model,
-                api_key=api_key,
-                messages=params.messages,
-                system_prompt=params.system_prompt,
-                max_tokens=params.max_tokens,
-            )
+            if use_stream:
+                completion, stream_ttft_ms, started = await _run_streaming(
+                    provider, model, api_key, params.messages,
+                    params.system_prompt, params.max_tokens,
+                )
+            else:
+                completion = await call_provider(
+                    provider=provider,
+                    model=model,
+                    api_key=api_key,
+                    messages=params.messages,
+                    system_prompt=params.system_prompt,
+                    max_tokens=params.max_tokens,
+                )
             used = est
-            attempts.append({"provider_id": pid, "outcome": "success"})
+            attempts.append({"provider_id": pid, "outcome": "success",
+                             "streamed": bool(use_stream)})
             # Log the successful decision, attributed to the provider that worked.
             success_cost = (
                 (completion.input_tokens_used / 1_000_000) * model.input_price_per_1m
@@ -430,9 +489,10 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
             break
         except Exception as exc:
             transient = is_transient_error(exc)
+            mid_stream = getattr(exc, "_cheaprouter_stream_started", False)
             attempts.append({
                 "provider_id": pid,
-                "outcome": "transient_error" if transient else "error",
+                "outcome": "mid_stream_error" if mid_stream else ("transient_error" if transient else "error"),
                 "error_class": str(exc).split(":")[0][:60],
             })
             # Log this provider's failure (feeds S8 health), attributed to it.
@@ -445,6 +505,9 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
                 session=params.session,
                 error=str(exc),
             )
+            if mid_stream:
+                # Tokens already streamed — failover is unsafe. Terminal.
+                break
             if not transient:
                 break   # non-transient → no point trying other providers
 
@@ -470,6 +533,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
             "region": used.region,
             "failed_over": len(attempts) > 1,
             "attempts": attempts,
+            "streamed": bool(params.stream and stream_supported(PROVIDERS[used.provider_id].protocol)),
         },
         "cost": {
             "actual_input_tokens": completion.input_tokens_used,
@@ -481,6 +545,9 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         "excluded_providers": decision.excluded,
         "deprioritized_providers": decision.deprioritized or [],
     }
+
+    if stream_ttft_ms is not None and result["routing"]["streamed"]:
+        result["time_to_first_token_ms"] = stream_ttft_ms
 
     # Price-table provenance on every response. If we got here while stale, the
     # override must be on — surface a loud warning alongside the result.

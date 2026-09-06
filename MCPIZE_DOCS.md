@@ -157,6 +157,7 @@ core tool — it selects the winner and makes the actual API call on your behalf
 | `health_aware` | boolean | — | `true` | Deprioritize recently-failing providers (never excludes) |
 | `max_failover` | integer | — | 2 | On a transient error (429/5xx/timeout), how many further providers to try in ranked order. 0 disables. |
 | `cached_input_tokens` | integer | — | 0 | Of `input_tokens`, how many are expected cache hits. Priced at each model's cache-read rate for providers that support caching (Anthropic, OpenAI, DeepSeek), which can change the cheapest choice. |
+| `stream` | boolean | — | `false` | Consume the provider's streaming endpoint. Lowers time-to-first-token (reported as `time_to_first_token_ms`); the full text still returns as one result. Failover applies only before the first token. |
 
 **Example:**
 ```json
