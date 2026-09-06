@@ -12,6 +12,7 @@ Handles two wire formats:
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -218,3 +219,158 @@ async def _call_gemini(
         model_id=model.model_id,
         raw_response=data,
     )
+
+
+# ─── Streaming (S5) ───────────────────────────────────────────────────────────
+#
+# A streaming layer that consumes each provider's SSE stream and yields text
+# chunks as they arrive. This lowers time-to-first-token and lets the caller show
+# liveness. Supports the Anthropic and OpenAI-compatible wire formats (6 of 8
+# providers); Gemini's streaming uses a different framing and is not covered here,
+# so stream_supported() reports which providers can stream.
+#
+# Failover note (see server.py): failover is only safe BEFORE the first chunk.
+# Once any token has been yielded the caller may have seen partial output, so a
+# mid-stream error is terminal — never silently retried on another provider.
+
+from dataclasses import dataclass as _dataclass
+
+
+@_dataclass
+class StreamChunk:
+    text: str = ""                    # incremental text (may be empty on control frames)
+    done: bool = False                # final frame
+    input_tokens_used: int = 0        # populated on/near the final frame when available
+    output_tokens_used: int = 0
+    model_id: str = ""
+
+
+def stream_supported(protocol: str) -> bool:
+    """Whether the streaming layer supports a provider's wire format."""
+    return protocol in ("anthropic", "openai")
+
+
+async def stream_provider(
+    provider: ProviderConfig,
+    model: ModelConfig,
+    api_key: str,
+    messages: list[dict],
+    system_prompt: Optional[str] = None,
+    max_tokens: int = 2048,
+):
+    """
+    Async generator yielding StreamChunk objects from a provider's SSE stream.
+
+    Raises (before the first yielded chunk) the same httpx errors as call_provider,
+    so pre-stream failover can classify them. Once the first chunk is yielded, an
+    error propagates as-is and must be treated as terminal by the caller.
+    """
+    protocol = provider.protocol
+    if protocol == "anthropic":
+        gen = _stream_anthropic(provider, model, api_key, messages, system_prompt, max_tokens)
+    elif protocol == "openai":
+        gen = _stream_openai_compat(provider, model, api_key, messages, system_prompt, max_tokens)
+    else:
+        raise ValueError(f"Streaming not supported for protocol {protocol!r}")
+    async for chunk in gen:
+        yield chunk
+
+
+async def _stream_anthropic(provider, model, api_key, messages, system_prompt, max_tokens):
+    headers = {
+        "x-api-key": api_key,
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        **provider.extra_headers,
+    }
+    body: dict[str, Any] = {
+        "model": model.model_id,
+        "max_tokens": max_tokens,
+        "messages": messages,
+        "stream": True,
+    }
+    if system_prompt:
+        body["system"] = system_prompt
+
+    in_tok = out_tok = 0
+    model_id = model.model_id
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        async with client.stream("POST", f"{provider.base_url}/v1/messages",
+                                 headers=headers, json=body) as r:
+            r.raise_for_status()
+            async for line in r.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if not payload:
+                    continue
+                try:
+                    evt = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                etype = evt.get("type")
+                if etype == "message_start":
+                    usage = evt.get("message", {}).get("usage", {})
+                    in_tok = usage.get("input_tokens", in_tok)
+                    model_id = evt.get("message", {}).get("model", model_id)
+                elif etype == "content_block_delta":
+                    delta = evt.get("delta", {})
+                    text = delta.get("text", "")
+                    if text:
+                        yield StreamChunk(text=text, model_id=model_id)
+                elif etype == "message_delta":
+                    out_tok = evt.get("usage", {}).get("output_tokens", out_tok)
+                elif etype == "message_stop":
+                    break
+    yield StreamChunk(done=True, input_tokens_used=in_tok,
+                      output_tokens_used=out_tok, model_id=model_id)
+
+
+async def _stream_openai_compat(provider, model, api_key, messages, system_prompt, max_tokens):
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        **provider.extra_headers,
+    }
+    full_messages = []
+    if system_prompt:
+        full_messages.append({"role": "system", "content": system_prompt})
+    full_messages.extend(messages)
+    body: dict[str, Any] = {
+        "model": model.model_id,
+        "max_tokens": max_tokens,
+        "messages": full_messages,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+
+    in_tok = out_tok = 0
+    model_id = model.model_id
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        async with client.stream("POST", f"{provider.base_url}/v1/chat/completions",
+                                 headers=headers, json=body) as r:
+            r.raise_for_status()
+            async for line in r.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if not payload or payload == "[DONE]":
+                    continue
+                try:
+                    evt = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                model_id = evt.get("model", model_id)
+                choices = evt.get("choices", [])
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    text = delta.get("content") or ""
+                    if text:
+                        yield StreamChunk(text=text, model_id=model_id)
+                usage = evt.get("usage")
+                if usage:
+                    in_tok = usage.get("prompt_tokens", in_tok)
+                    out_tok = usage.get("completion_tokens", out_tok)
+    yield StreamChunk(done=True, input_tokens_used=in_tok,
+                      output_tokens_used=out_tok, model_id=model_id)
