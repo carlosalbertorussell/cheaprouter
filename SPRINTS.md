@@ -99,6 +99,42 @@ the two forces that fight each other; this sequence resolves them.
   hand-encoding time-of-day/region tables that then go stale. Depends on SC2;
   natural sibling of SC3.
 
+- **SC5 — Caller price overrides (BYO cheaper price).** BYOK already lets a caller
+  bring their own *key*; SC5 lets them bring their own *price*. An optional
+  per-request `price_overrides` map (`{provider: {input_price_per_1m, output_price_per_1m,
+  cached_input_price_per_1m}}`) replaces the table's list price **for that request's
+  cost ranking only**, when the caller has a better rate (negotiated/enterprise,
+  promo, spot/aggregator discount, credits). Serves the arbitrage thesis directly:
+  if you've negotiated DeepSeek to half list, cheaprouter should route to it more
+  aggressively because for *you* it's even cheaper. Caller-supplied, per-request,
+  never stored (same as keys). Response flags which providers used a caller price
+  vs the table.
+  **Staleness-guard interaction (the subtle part):** an overridden provider's price
+  is self-certified-current, so it doesn't need the table. Rule: override providers
+  bypass the S4a guard *for themselves*; if **all** eligible providers are overridden
+  the request routes even on a stale table (the table isn't used); but a **mixed**
+  request (some overridden, some relying on the table) still refuses when stale —
+  comparing fresh caller-prices against stale table-prices is exactly the
+  indefensible mix the guard exists to prevent.
+
+- **SC6 — Data-residency constraints (declared, not detected).** A first-class
+  `data_residency` constraint (e.g. `"eu"`) that hard-filters the eligible pool to
+  providers whose jurisdiction satisfies it, and **refuses** (like the stale-price
+  guard) if none qualify — never silently falling back to a non-compliant provider.
+  Stronger and clearer than the incidental `allowed_regions`/`region` tag: it reads
+  as "these tokens must only go to <jurisdiction> providers." Response shows each
+  candidate's jurisdiction so the decision is auditable.
+  **Honest boundary — load-bearing, must be documented plainly:** cheaprouter
+  **enforces the constraint the caller declares; it does NOT detect personal data
+  and does NOT constitute legal compliance.** It cannot inspect content to know a
+  request contains PII — by design, the privacy model never touches message
+  content. The caller (who knows their data) declares the constraint; cheaprouter
+  honours it or refuses. Anything claiming auto-PII-detection would either break the
+  privacy invariant or be compliance theater. Bridges toward the Enterprise-tier
+  gateways (Azure/Bedrock/Vertex regional endpoints give the legally-adequate
+  residency guarantees a raw provider API doesn't). Relates to SC4 (jurisdictional
+  pricing).
+
 ### High value — extends the arbitrage thesis
 
 
