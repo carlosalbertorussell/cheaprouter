@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **SP1c — the pricing server (`pricing_server.py`).** The second MCP entrypoint in this repo — CheapRouter Pricing, the 'pricing head' on the shared price-truth spine. Serves verified price truth **provenance-first** (every response leads with tier / verified_at / source / staleness): `pricing_get` (one model's verified price), `pricing_list` (the whole table), `pricing_drift` (where the OpenRouter feed disagrees — a re-verify signal, never an auto-update), `pricing_history` (the trajectory series — the citable KPI record). Adds NO routing; imports the same spine (pricing_table, refresh, provenance, price_history) as the router. Distinct default port (8082) + `mcpize.pricing.yaml` so both servers deploy from one repo. Router unchanged; 174 tests pass. (Write path `pricing_verify` is SP1e; the router->pricing observed signal is SP1d.)
+
+### Added
 - **SP1b — price history (the trajectory record).** New `price_history.py`: an append-only, provenance-tagged record of price *changes* over time — the citable series that turns a snapshot into a KPI (a KPI's value is its trajectory). Pluggable backend; **versioned-file default** (`price_history.jsonl`, un-ignored so git is its immutable audit log), Postgres as the documented upgrade path, never Redis. `record_diff()` bridges a table update to history entries; `trajectory()` returns the series behind a symbol; `summary()` aggregates. Metadata only — no keys, no content (verified by test). Standalone in SP1b; capture wires into the verify flow at SP1d/SC8. No router change; 162 tests pass.
 
 ### Added

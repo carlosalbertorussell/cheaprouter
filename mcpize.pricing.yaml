@@ -1,0 +1,15 @@
+name: cheaprouter-pricing
+version: 1.0.0
+description: "CheapRouter Pricing — verified LLM token-price truth with provenance. Serves the current verified price table, drift vs the OpenRouter feed, and price history/trajectory. The pricing 'head' of the router's shared price-truth spine. Read-only in this release."
+runtime: python
+entrypoint: pricing_server.py
+
+build:
+  command: pip install -r requirements.txt
+
+env:
+  # Distinct port from the router (8081) so both deploy from one repo.
+  PRICING_PORT: "8082"
+  # Price history persists to the versioned repo file by default (git = audit log).
+  # Override to point at an external store if desired.
+  PRICE_HISTORY_FILE: "price_history.jsonl"
