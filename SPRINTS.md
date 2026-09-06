@@ -128,6 +128,15 @@ the two forces that fight each other; this sequence resolves them.
 
 ### Deferred / out of scope
 
+**Considered providers (evaluated for the token-priced core, declined — reasons on record so they don't resurface):**
+
+- **Manus** — autonomous agent platform, **credit-based** pricing (bundles LLM tokens + VM + browser + third-party calls into one opaque unit). No per-token cost to compare; breaks the cost model, the price table, and the S4a staleness guard. If ever pursued, it's a separate "agent tier" with its own complexity-based cost basis, **not** a token-priced provider. (Declined at project start and again 2026-09-05.)
+- **MS Copilot / Azure** — two different things. The **Copilot product** (M365 Copilot, Copilot Studio) is seat-licensed SaaS with no per-token price — can't fit the engine, same class as Manus. **Azure OpenAI / AI Foundry** *is* a real per-token API, but it re-serves models cheaprouter already reaches directly (GPT, Claude) at a compliance premium, with non-BYOK auth (resource endpoints + deployment names + Azure AD). Its value is data residency / BAA / EU tenancy, not price — an **Enterprise-tier gateway feature**, not a cheapest-token catalog entry. Lives with the enterprise gateways below.
+- **Hermes Agent** (Nous Research agent framework) — MIT agent framework, BYOM: "you pay whatever the underlying LLM provider charges." It's a **consumer** of routers like cheaprouter, not a provider to add. Manus-class no.
+- **Nous Hermes *models*** (Hermes 4 70B/405B etc.) — these DO fit the cost model (per-MTok, OpenAI-compatible, e.g. Hermes 4 70B $0.13/$0.40). But they're cheap open-weight models in the same lane Groq occupies, and their best prices come *through* aggregators (Nebius, OpenRouter). So they're a good **SC3 candidate — the first solid one — reached via the SC2 OpenRouter source**, not a standalone ninth provider to hand-verify. Yes, but later and through the catalog-expansion path, not now.
+
+The through-line: a provider joins the core only if it's **token-priced and adds model or price coverage we don't already have**. Agent/credit platforms fail the first test; gateways and same-lane hosts fail the second.
+
 - **New providers** (distinct from SC3, which expands models *within* the current
   eight). These stay deferred unless a specific need pulls one in:
   - Chinese labs beyond DeepSeek/Qwen — Moonshot (Kimi K2), Zhipu (GLM),
