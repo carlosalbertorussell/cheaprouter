@@ -15,6 +15,7 @@ providers.py  — provider registry, built from the price table; regions, key re
 pricing_table.py — loads/validates prices.json; staleness guard (S4a); tier-aware (SP1a)
 provenance.py — the three trust tiers: verified / proxy / observed (SP1a; pricing-server spine)
 price_history.py — append-only trajectory record; versioned-file backend, git = audit log (SP1b)
+pricing_server.py — SECOND MCP entrypoint: serves verified price truth (get/list/drift/history), provenance-first (SP1c)
 refresh.py    — drift check vs fetchable sources; OpenRouter feed for 6 providers (S4b/SC2)
 prices.json   — versioned price table with provenance (verified_at, max_age_days)
 client.py     — async HTTP client; three wire protocols; transient-error classifier (S2); SSE streaming layer (S5)
