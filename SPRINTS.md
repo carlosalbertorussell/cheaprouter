@@ -125,6 +125,41 @@ the two forces that fight each other; this sequence resolves them.
   residency guarantees a raw provider API doesn't). Relates to SC4 (jurisdictional
   pricing).
 
+- **SC7 — Freshness SLA / auto-refresh loop.** The "best execution" question:
+  guarantee routing is always against near-current prices *without* per-call
+  polling. Per-call polling is the wrong mechanism and is explicitly rejected: it
+  adds hundreds of ms–seconds of blocking I/O to the hot path (undoing S5's TTFT
+  work) to catch a change that, for LLM pricing, happens on the order of **weeks,
+  not seconds** — LLM API prices are near-static between infrequent discrete
+  repricing events, so real-time polling fetches identical numbers thousands of
+  times for almost no benefit, at high latency/rate-limit/provenance cost. It also
+  replaces verified, auditable prices (the whole S4a/SC1 basis of a defensible
+  savings figure) with unprovenanced live scrapes — *worse* execution, not better.
+  The correct design is a **freshness contract**, most of which already exists:
+  route only on known-current verified prices (SC1), refuse rather than route on
+  stale ones (S4a guard), check drift out-of-band (SC2), let callers inject a live
+  price per request (SC5). SC7 tightens the one loose loop: today drift-checking is
+  on-demand/weekly and doesn't close the loop (SC2 proposes, never auto-writes, to
+  keep provenance). SC7 adds a **scheduled daily drift check that auto-surfaces
+  significant drift** — opens a PR with the proposed update (human still merges, so
+  provenance holds), or, if feed-provenance is explicitly accepted for a provider,
+  fast-tracks it — so a real price change is caught within a day, not whenever
+  someone remembers. Bounded, threshold-gated (only significant drift), zero hot-path
+  latency. **Optional cross-check:** a second automated proxy (e.g. a Price-Per-Token
+  MCP) to flag where OpenRouter's routed price diverges from provider-direct — two
+  disagreeing proxies are more informative than one (cf. the o3 $2/$8-vs-$10/$40
+  conflict that correctly triggered manual verification). Depends on SC2.
+
+**Note — no single source of pricing truth exists, by design of the market.**
+Pricing ground-truth is federated: it lives on 8 provider pages, in 8 formats,
+changing on 8 schedules. There is no consolidated tape for LLM tokens. OpenRouter
+(SC2) is the best unified *proxy* but is not ground truth (it prices its own
+routed rate, and can't see DeepSeek peak/off-peak, Qwen regions, or context
+cliffs — SC4's remit). Aggregator/tracker sites are secondary and occasionally
+conflict. The chosen architecture is therefore correct for a federated market:
+a fast automated proxy (SC2) for breadth + per-provider manual verification for
+authority and the proxy's blind spots + caller overrides (SC5) for live prices.
+
 ### High value — extends the arbitrage thesis
 
 
