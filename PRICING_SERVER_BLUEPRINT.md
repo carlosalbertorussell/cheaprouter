@@ -142,14 +142,67 @@ waist. Two clean, defined signal channels — never deep reach-in:
    If they couldn't run independently, we'd have built one server with two faces
    and lost the option to ever split — so the interface stays clean.
 
-## 7. Price history (`price_history.py`) — the real new capability
+## 7. Price history (`price_history.py`) — the real new capability, and its store
 
 A source-of-truth needs *change over time*, which the current design lacks. A
-provenanced, append-only record: each entry = (provider, model, field, old, new,
-tier, source, timestamp). Powers `pricing_history`, drift-over-time, and "how
-much has DeepSeek dropped this quarter?" — the citable series no scraper keeps
-well. Storage: reuse the pluggable backend from S1 (Upstash/JSONL). **History is
-metadata only** (prices + provenance), never content — same invariant.
+provenanced, append-only record: each entry =
+`(provider, model, tier, field, old, new, provenance_tier, source, verified_at,
+observed_at)`. Powers `pricing_history`, drift-over-time, and "how much has
+DeepSeek dropped this quarter?" — the citable series no scraper keeps well, and
+(under the financial-KPI framing, see PRICING_STRATEGY.md) the **core asset**: a
+KPI's value is its trajectory, not its spot value.
+
+### Why NOT Redis / Upstash for this (settled)
+
+Reaching for the store already in the stack (Upstash Redis, from S1) is the
+natural instinct — and it is the **wrong tool for trend data.** Redis is a
+key-value/in-memory store optimised for fast lookups of *current state* — right
+for S1's session/spend logs (write-append, read-recent, key-shaped), wrong for
+price history, which is:
+- **queried analytically** — range scans and aggregations over time
+  ("every change for DeepSeek balanced over 8 quarters", "which providers cut in
+  Q3", "the trajectory of the tier_powerful cohort"), not key lookups;
+- **append-mostly, read-analytical, loss-intolerant** — a gap in the series is a
+  *defect in the product*, because completeness is the value proposition;
+- **unbounded and slow-growing, kept forever** — Redis is memory-priced; storing
+  years of every-price-change in RAM-backed storage pays premium rates for cold
+  archival data.
+Redis *can* be bent to this (RedisTimeSeries, sorted-set gymnastics) but you fight
+the tool and pay memory prices for archival data. Note this is NOT a reversal of
+the S1 Supabase->Upstash swap: S1's data is key-shaped (Redis wins); history is
+table-shaped (Redis loses). Right tool per data shape, not a change of mind.
+
+### The store, by product stage (pluggable interface)
+
+`price_history.py` is written against a **storage interface** (exactly like S1's
+pluggable backend) so the choice is not load-bearing and can graduate without
+touching history logic — the same discipline that let S1 swap Supabase->Upstash
+cleanly. Backends, in the order to adopt them:
+
+1. **Versioned append-only file (start here).** Price changes happen *weekly, not
+   per-second* (the SC7 insight), so volume is tiny — order hundreds of rows/year
+   across all providers. A committed append-only JSONL (or small Parquet) needs no
+   database, is queryable with DuckDB/pandas, and — crucially for a *certified*
+   product — **git itself is the immutable audit log**, giving provenance for
+   free. For a slow-moving, provenance-critical, modest-volume dataset this is not
+   a hack; it is arguably *more* certifiable than a database.
+2. **Postgres (upgrade path).** When/if the KPI-intelligence product needs live
+   analytical queries at scale, move to Postgres (e.g. Supabase): a `price_history`
+   table where trend queries are plain SQL (`GROUP BY`, `date_trunc`, window
+   functions for trajectory). Trend queries *are* relational queries.
+3. **TimescaleDB / columnar (only if it gets serious).** A Postgres extension, so
+   same SQL surface, no lock-in from starting at (2). Overkill until high-frequency
+   analytics demand it.
+
+**Store choice follows product direction:** if history is only an *internal
+drift/validation signal* (blueprint minimal version), the existing S1 backend is
+fine — don't add anything. If it is the *core asset of a certified KPI product*
+(the recorded framing), it must be **auditable and citable**, which points to the
+versioned file first and Postgres later, and away from Redis — "here is the signed,
+dated, append-only record" is a stronger provenance claim than "trust our cache."
+
+**History is metadata only** (prices + provenance), never content — same invariant
+as S1, and (per §6) it holds across the waist too.
 
 ## 8. What this is NOT (guardrails)
 
@@ -181,7 +234,7 @@ metadata only** (prices + provenance), never content — same invariant.
 
 - **SP1a** — formalise the waist: extract `provenance.py` (the three tiers) and
   make `pricing_table.py` tier-aware, no behaviour change to the router.
-- **SP1b** — `price_history.py` + history capture on verified changes.
+- **SP1b** — `price_history.py` + history capture on verified changes. Pluggable store; **versioned append-only file backend first** (git = audit log), Postgres as the documented upgrade path. NOT Redis (see §7).
 - **SP1c** — `pricing_server.py` entrypoint + the read tools (get/list/drift/
   history).
 - **SP1d** — the waist interaction: router publishes observed/availability
