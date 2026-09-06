@@ -237,9 +237,9 @@ as S1, and (per §6) it holds across the waist too.
 - **SP1b** — ✅ SHIPPED 2026-09-05. `price_history.py`: append-only, pluggable, versioned-file backend (git = audit log); record_diff/trajectory/summary; metadata-only. 12 tests. Capture wiring into the verify flow is SP1d/SC8.
 - **SP1c** — ✅ SHIPPED 2026-09-05. `pricing_server.py` + read tools (get/list/
   drift/history), provenance-first; distinct port + mcpize.pricing.yaml. 12 tests.
-- **SP1d** — the waist interaction: router publishes observed/availability
-  signals; pricing consumes them as validation/drift (metadata-only, tested for
-  no-leak, exactly as S1's key/content-leak tests).
+- **SP1d** — ✅ SHIPPED 2026-09-05. Router publishes OBSERVED signal to the shared
+  price-history spine (opt-in, metadata-only, no-leak tested); observed_validation
+  + pricing_observed tool; observed never promotes to verified. 9 tests.
 - **SP1e** — `pricing_verify` operator write path + docs positioning the pricing
   server as the reference source.
 

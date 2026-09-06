@@ -70,6 +70,11 @@ class PricingHistoryInput(BaseModel):
     trajectory_only: bool = Field(False, description="If True and provider+model_id given, return the oldest->newest price series only.")
 
 
+class PricingObservedInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    limit: int = Field(500, description="Max observed records to validate.", ge=1, le=2000)
+
+
 # ─── Provenance-first helpers ─────────────────────────────────────────────────
 
 def _table_prov_block() -> dict:
@@ -232,6 +237,34 @@ async def pricing_history(params: PricingHistoryInput) -> str:
         "summary": ph.summary(params.limit),
         "count": len(records),
         "changes": records,
+    }, indent=2)
+
+
+@mcp.tool(
+    name="pricing_observed",
+    annotations={"title": "Observed-vs-Verified Validation", "readOnlyHint": True,
+                 "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+)
+async def pricing_observed(params: PricingObservedInput) -> str:
+    """
+    Validate the verified table against OBSERVED signals — what real completions
+    actually cost, published by the router across the shared spine (SP1d).
+
+    Observed cost that matches the verified price is a confidence signal; observed
+    cost that materially diverges is a 're-verify' trigger — stronger than a feed
+    comparison because it's real spend. This NEVER changes a price: observed data
+    challenges the verified tier, it does not promote into it.
+
+    Args:
+        params (PricingObservedInput): max observed records to validate.
+
+    Returns:
+        str: JSON validation report (confirms / diverges per observed point).
+    """
+    from refresh import observed_validation
+    return json.dumps({
+        "provenance": _table_prov_block(),
+        "validation": observed_validation(limit=params.limit),
     }, indent=2)
 
 

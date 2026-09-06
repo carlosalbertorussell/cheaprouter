@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **SP1d — the waist interaction (observed signal).** The router now publishes what a real completion effectively cost as an `observed`-tier signal across the shared price-history spine (opt-in via `ARBITRAGE_EMIT_OBSERVED`, metadata-only — provider, model, tier, per-1M unit price; never tokens-of-content or keys). New `price_history.record_observed()` + `observed_entries()`; `refresh.observed_validation()` compares observed cost to the verified table (confirms / diverges, >15% flags re-verify); new `pricing_observed` tool surfaces it. **Observed never becomes a price** — it validates or challenges the verified tier, never promotes into it (`provenance.can_promote` is always False). Tied at the waist via a shared module, NOT a server-to-server call — each server still stands alone. Router behaviour unchanged (emit off by default); 183 tests.
+
+### Added
 - **SP1c — the pricing server (`pricing_server.py`).** The second MCP entrypoint in this repo — CheapRouter Pricing, the 'pricing head' on the shared price-truth spine. Serves verified price truth **provenance-first** (every response leads with tier / verified_at / source / staleness): `pricing_get` (one model's verified price), `pricing_list` (the whole table), `pricing_drift` (where the OpenRouter feed disagrees — a re-verify signal, never an auto-update), `pricing_history` (the trajectory series — the citable KPI record). Adds NO routing; imports the same spine (pricing_table, refresh, provenance, price_history) as the router. Distinct default port (8082) + `mcpize.pricing.yaml` so both servers deploy from one repo. Router unchanged; 174 tests pass. (Write path `pricing_verify` is SP1e; the router->pricing observed signal is SP1d.)
 
 ### Added

@@ -295,3 +295,71 @@ def format_drift_report(report: dict) -> str:
         lines.append("Review the proposed changes, verify against the provider's pricing page,")
         lines.append("then update prices.json and set verified_at to today. Nothing was changed.")
     return "\n".join(lines)
+
+
+# ─── Observed-vs-verified validation (SP1d) ───────────────────────────────────
+#
+# Compares OBSERVED-tier history (what real completions actually cost, from the
+# router) against the VERIFIED table. Observed matching verified is a confidence
+# signal; observed materially diverging is a drift trigger — "reality disagrees,
+# go verify" — stronger than a feed comparison because it's real spend.
+#
+# This NEVER changes any price. Observed data challenges the verified tier; it
+# does not promote into it (provenance.can_promote is always False). The output is
+# a report a human (or SC8) acts on.
+
+OBSERVED_DRIFT_THRESHOLD = 0.15   # >15% divergence flags a re-verify
+
+
+def observed_validation(table: Optional[dict] = None, limit: int = 1000) -> dict:
+    """
+    Compare recent observed unit-costs to the verified table.
+
+    Returns { checked_at, findings: [...], summary }. Each finding classifies a
+    provider/model/field as 'confirms' (observed ~ verified) or 'diverges'
+    (observed materially off → re-verify signal). Providers with no observed data
+    simply don't appear. Never mutates the table.
+    """
+    from datetime import datetime, timezone
+    import price_history as ph
+    t = table or raw_table()
+
+    # index verified prices: (provider, model_id, field) -> price
+    verified = {}
+    for pid, prov in t["providers"].items():
+        for tier, m in prov.get("models", {}).items():
+            mid = m.get("model_id")
+            for field in ("input_price_per_1m", "output_price_per_1m"):
+                if field in m:
+                    verified[(pid, mid, field)] = float(m[field])
+
+    findings = []
+    for e in ph.observed_entries(limit=limit):
+        key = (e.get("provider"), e.get("model_id"), e.get("field"))
+        v = verified.get(key)
+        if v is None:
+            continue
+        obs = float(e["new"])
+        if v <= 0:
+            continue
+        rel = abs(obs - v) / v
+        findings.append({
+            "provider": e["provider"], "model_id": e["model_id"], "field": e["field"],
+            "verified": v, "observed": round(obs, 8), "rel_diff": round(rel, 4),
+            "status": "diverges" if rel > OBSERVED_DRIFT_THRESHOLD else "confirms",
+            "ts": e.get("ts"),
+        })
+
+    diverges = [f for f in findings if f["status"] == "diverges"]
+    return {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "findings": findings,
+        "summary": {
+            "observed_points": len(findings),
+            "confirms": len(findings) - len(diverges),
+            "diverges": len(diverges),
+            "threshold": OBSERVED_DRIFT_THRESHOLD,
+        },
+        "any_divergence": bool(diverges),
+        "note": "Observed cost validates or challenges the verified table; it never becomes a published price.",
+    }
