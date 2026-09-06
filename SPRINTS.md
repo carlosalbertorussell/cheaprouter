@@ -55,20 +55,6 @@ automated (SC2) first, and automation is pointless until the catalog is not
 broken (SC1). The one-model-per-tier limit and the manual staleness burden are
 the two forces that fight each other; this sequence resolves them.
 
-- **SC1 — Catalog refresh (fix the eight).** The verification pass (2026-09-05,
-  see `CATALOG_REFRESH.md`) found the model catalog ~14 months stale: Gemini
-  (2.0-flash / 1.5-pro) and DeepSeek (chat / reasoner) model IDs are **retired
-  and fail at call time**; Anthropic's Opus tier carries the retired $15/$75 rate
-  (Opus 4.6 is $5/$25); Mistral prices are all wrong; OpenAI o3 has a source
-  conflict; Groq is fine. **Blocked on Carlos's tier-mapping decisions** (which
-  current model → fast/balanced/powerful per provider — see CATALOG_REFRESH.md
-  §"Decisions needed"). Once decided: verify each chosen model's current price
-  from its provider page (cite it), update prices.json, set verified_at to today,
-  PR for review. Clears the S4a staleness guard and gets the deployed server
-  routing again. No invented prices, no silently-chosen models. Qwen + Grok still
-  need verifying as part of this. **This is the immediate priority — three
-  providers are broken right now.**
-
 - **SC2 — Programmatic price source (OpenRouter feed).** Currency is fully manual
   today, which is why a large catalog is dangerous. OpenRouter fronts hundreds of
   models through one OpenAI-compatible endpoint **and publishes machine-readable
@@ -181,6 +167,7 @@ The through-line: a provider joins the core only if it's **token-priced and adds
 
 ## Closed
 
+- **SC1 — Catalog refresh** (2026-09-05) — verified all 8 providers against current pricing; the table is current again so the deployed server routes instead of refusing. Replaced 4 providers' retired model IDs (Gemini, DeepSeek, Grok, Qwen) that would fail at call time; corrected all stale prices (Anthropic Opus $15/$75→$5/$25, all Mistral, o3 $10/$40→$2/$8). Cheapest-current-per-tier rule; Mistral Medium dropped (Large now cheaper). DeepSeek off-peak, Qwen Singapore, standard context — variance noted for SC4. verified_at=2026-09-05, guard now fresh. 6 stale-premise tests updated (shipped table is now fresh, not stale); Gemini gained verified cache pricing. 130 tests pass.
 - **S5 — Streaming completions** (2026-09-05) — route_completion 'stream' option consumes the provider SSE stream (anthropic + openai formats; gemini falls back). Streaming client layer (stream_provider/stream_supported). Reports time_to_first_token_ms. Failover is pre-first-token only — a mid-stream error is terminal (tagged _cheaprouter_stream_started), never retried, since partial output may be committed. MCP returns one final result; this is server-side streaming from the provider, not an MCP-level token stream. 7 tests.
 - **S3 — Prompt-caching awareness** (2026-09-05) — cost model prices cache-hit input tokens at each model's cache-read rate; cached_input_tokens hint on get_pricing/estimate_cost/route_completion. cached_input_price_per_1m in the table for anthropic/openai/deepseek; others bill cache tokens at full input rate (never advantaged). Can flip the winner on cache-heavy loads (proven: DeepSeek beats Groq at tier_fast under heavy caching). Estimates report cache_supported. Inherits S4a staleness. 10 tests.
 - **S4b — Price refresh path** (2026-09-05) — refresh.py + arbitrage_check_price_drift compare fetchable prices to the table and report drift (match/drift/fetch_failed/manual); propose_updated_table() builds a review candidate but never writes prices.json or advances verified_at. Per-provider 'refresh' strategy in prices.json (json_api|manual); all manual today (no verified programmatic source — no invented prices). scripts/refresh_prices.py for CI/cron. 9 tests. Clears the S4a guard via reviewed diff, not blind editing.

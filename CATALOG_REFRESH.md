@@ -1,5 +1,8 @@
 # Catalog Refresh — findings & decisions needed
 
+> **STATUS: EXECUTED 2026-09-05 (SC1).** Decision taken: *cheapest current model per tier*. All 8 providers verified and prices.json updated (verified_at=2026-09-05); the guard is fresh and the server routes again. DeepSeek encoded off-peak, Qwen at Singapore, standard context — peak/region/long-context variance deferred to SC4. This document is retained as the verification record.
+
+
 Working notes for the model-catalog refresh sprint (S-catalog). This is the
 verification pass from 2026-09-05, escalated to a sprint because the catalog —
 not just the prices — is ~14 months stale. Several providers' model IDs in

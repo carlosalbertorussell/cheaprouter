@@ -145,14 +145,15 @@ def test_status_block_shape(tmp_path, monkeypatch):
     assert set(st) >= {"verified_at", "age_days", "max_age_days", "stale", "allow_stale_override"}
 
 
-# ─── the shipped table is (deliberately) stale ────────────────────────────────
+# ─── the shipped table is current (verified 2026-09-05 by SC1) ────────────────
 
-def test_shipped_prices_json_is_stale():
-    """The committed prices.json is ~430 days old by design; the guard must catch it."""
+def test_shipped_prices_json_is_fresh():
+    """After the SC1 catalog refresh the committed prices.json is current; the
+    guard must NOT flag it stale. (Will re-stale after max_age_days — that's the
+    guard working; re-verify prices when it does.)"""
     import importlib, pricing_table
-    # reload against the real repo file (clear any env override)
     import os
     os.environ.pop("ARBITRAGE_PRICES_FILE", None)
     pt = importlib.reload(pricing_table)
-    assert pt.is_stale() is True
-    assert pt.age_days() > 300
+    assert pt.is_stale() is False
+    assert pt.age_days() <= pt.MAX_AGE_DAYS

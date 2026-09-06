@@ -14,10 +14,26 @@ def _run(coro):
 
 @pytest.fixture
 def fresh_env(tmp_path, monkeypatch):
-    """Isolate history to a temp file; leave prices as the real (stale) shipped table."""
+    """Isolate history to a temp file."""
     monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
     monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
     monkeypatch.setenv("ARBITRAGE_HISTORY_FILE", str(tmp_path / "h.jsonl"))
+
+
+@pytest.fixture
+def stale_table(tmp_path, monkeypatch):
+    """
+    Point ARBITRAGE_PRICES_FILE at an old-dated copy of the real table.
+
+    The shipped prices.json is now current (SC1 refresh), so refusal behaviour
+    can no longer rely on the real file being stale — we synthesise staleness.
+    """
+    real = json.loads(open("prices.json").read())
+    real["verified_at"] = (date.today() - timedelta(days=400)).isoformat()
+    f = tmp_path / "stale.json"
+    f.write_text(json.dumps(real))
+    monkeypatch.setenv("ARBITRAGE_PRICES_FILE", str(f))
+    return f
 
 
 def _reload_server():
@@ -27,8 +43,7 @@ def _reload_server():
     return importlib.reload(server)
 
 
-def test_route_completion_refuses_when_stale(fresh_env, monkeypatch):
-    monkeypatch.delenv("ARBITRAGE_PRICES_FILE", raising=False)
+def test_route_completion_refuses_when_stale(fresh_env, stale_table, monkeypatch):
     monkeypatch.delenv("ARBITRAGE_ALLOW_STALE_PRICES", raising=False)
     server = _reload_server()
     params = server.RouteCompletionInput(
@@ -39,8 +54,7 @@ def test_route_completion_refuses_when_stale(fresh_env, monkeypatch):
     assert out["price_table"]["stale"] is True
 
 
-def test_estimate_cost_refuses_when_stale(fresh_env, monkeypatch):
-    monkeypatch.delenv("ARBITRAGE_PRICES_FILE", raising=False)
+def test_estimate_cost_refuses_when_stale(fresh_env, stale_table, monkeypatch):
     monkeypatch.delenv("ARBITRAGE_ALLOW_STALE_PRICES", raising=False)
     server = _reload_server()
     params = server.EstimateCostInput(
@@ -49,8 +63,7 @@ def test_estimate_cost_refuses_when_stale(fresh_env, monkeypatch):
     assert out["error"] == "price_table_stale"
 
 
-def test_override_downgrades_to_warning(fresh_env, monkeypatch):
-    monkeypatch.delenv("ARBITRAGE_PRICES_FILE", raising=False)
+def test_override_downgrades_to_warning(fresh_env, stale_table, monkeypatch):
     monkeypatch.setenv("ARBITRAGE_ALLOW_STALE_PRICES", "1")
     server = _reload_server()
     params = server.EstimateCostInput(
@@ -61,8 +74,7 @@ def test_override_downgrades_to_warning(fresh_env, monkeypatch):
     assert out["price_table"]["stale"] is True
 
 
-def test_provider_status_returns_data_when_stale(fresh_env, monkeypatch):
-    monkeypatch.delenv("ARBITRAGE_PRICES_FILE", raising=False)
+def test_provider_status_returns_data_when_stale(fresh_env, stale_table, monkeypatch):
     monkeypatch.delenv("ARBITRAGE_ALLOW_STALE_PRICES", raising=False)
     server = _reload_server()
     params = server.ProviderStatusInput()
