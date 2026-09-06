@@ -86,6 +86,59 @@ Paid-tier products:
 5. **Embedded/OEM** — good reach, less differentiated.
 6. **API SLA tiers** — commodity; fine as free-funnel + light paid, not the business.
 
+## Emerging framing — token pricing as a hyperscaler financial KPI (recorded, not yet lead positioning)
+
+Observation (2026-09): token price-per-capability-tier is behaving less like a
+product spec and more like a **competitive financial KPI** — a unit-economic
+measure tracked and moved for strategic reasons, the way "cost per available seat
+mile" works for airlines or "cost per kWh" for utilities. Evidence from the SC1
+verification pass alone:
+- OpenAI's o3 $10/$40 -> $2/$8; GPT-5.6 tier cuts described as "defend market share."
+- Anthropic holding Opus at $5/$25 across generations while repricing the old
+  $15/$75 tier *down* — a deliberate "premium, more affordable" signal.
+- Mistral Large priced *below* Mistral Medium — positioning, not cost.
+- DeepSeek introducing peak/off-peak billing — yield management imported from
+  airlines/electricity.
+- "The squeeze is coming from Chinese labs" as a pricing-pressure narrative.
+
+**If that framing holds, it reframes the paid tier** from "developer price feed"
+(commodity) to **"provenanced intelligence on an emerging financial KPI"** — whose
+buyers are equity analysts, FinOps-at-scale, M&A due-diligence, corporate strategy,
+and boards (Carlos's actual world), at a far higher willingness-to-pay than
+developer tooling. Under this framing `price_history` stops being a feature and
+becomes **the core asset** — a KPI's value is in its *trajectory*, not its spot
+value. "DeepSeek's balanced-tier cost fell 60% over three quarters while Anthropic
+held flat" is an intelligence product; "$0.27/1M today" is a lookup.
+
+**Status: recorded, NOT yet the lead positioning.** Decision deferred — the framing
+is real but positioning the whole paid tier around it is premature. Two caveats to
+weigh when deciding: (1) it raises the liability bar to a *financial-decision*
+standard (an analyst citing the trajectory in a memo relies at a different level
+than a dev looking up a price) — making the provenance discipline a legal
+requirement, not just a moat; (2) credible KPI intelligence about "the
+hyperscalers" wants comprehensive coverage of the financially-material players —
+which drives the coverage consequence below.
+
+### Consequence for coverage (this part IS decided)
+
+The KPI framing **does** change the coverage discipline — coverage expansion
+becomes a *driver*, not a default-defer. But it changes SC3's **rationale and
+target list, not its timing**: SC3 stays sequenced behind SC2 (expanding before
+currency is automated rebuilds the maintenance-vs-sprawl trap — unchanged). What
+changes:
+- SC3's expansion target now explicitly includes the **financially-material
+  players**, not just cheaper models within the eight: the major labs' full
+  lineups, and — newly relevant — the **cloud gateways (Azure OpenAI, AWS Bedrock,
+  Google Vertex)**, because that is where a large share of enterprise token spend
+  actually flows, so a KPI series that omits them is incomplete as *financial*
+  intelligence. (Gateways were deferred as *routing* targets; as *KPI-coverage*
+  targets they are in scope for SC3.)
+- Rationale shifts from "capture more arbitrage" to "be comprehensive enough that
+  the price-KPI series is citable as market intelligence."
+- Discipline preserved: still behind SC2, still threshold-gated, still no invented
+  prices. Comprehensiveness serves *citability*; a rigorous series beats a
+  sloppy-but-broad one — coverage grows only as fast as currency can keep it honest.
+
 ## The discipline this requires (non-negotiable)
 
 Every monetization option above adds a **promise**, and promises about data have

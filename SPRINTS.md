@@ -63,7 +63,7 @@ the two forces that fight each other; this sequence resolves them.
   scoring and drop rigid tiers), and (b) add newer models across the current eight
   providers. Comprehensiveness is the payoff, but it only stays honest because SC2
   keeps it current automatically. Depends on SC2. Deliberately NOT about adding
-  new providers — that's separate and mostly stays deferred (see below).
+  new providers — that's separate and mostly stays deferred (see below). **KPI-coverage driver (2026-09, see PRICING_STRATEGY.md):** if the pricing data is positioned as financial-KPI intelligence, SC3's target list explicitly adds the financially-material players — major labs' full lineups and the cloud gateways (Azure OpenAI / AWS Bedrock / Google Vertex, in scope here as KPI-coverage targets even though deferred as routing targets) — because a KPI series that omits them is incomplete as market intelligence. Rationale shifts from 'more arbitrage' to 'citable coverage'; timing unchanged (still behind SC2).
 
 - **SC4 — Variable / jurisdictional pricing schema.** The one-price-per-model
   schema flattens away real, structured price variation that the arbitrage engine
