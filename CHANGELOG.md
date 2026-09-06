@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **SC2 programmatic price source (OpenRouter feed).** `arbitrage_check_price_drift` and `refresh.py` now drift-check 6 providers (Anthropic, OpenAI, Gemini, Mistral, DeepSeek, Grok) against OpenRouter's public `/api/v1/models` feed — the automated source S4b's machinery was built for. One shared fetch indexes all models; OpenRouter's per-token prices are converted to per-1M and compared incl. cache-read rates. Groq and Qwen stay manual (documented: Groq's price is host-specific, not the open model OpenRouter prices; Qwen's current OpenRouter IDs are unstable). Missing IDs and feed outages degrade to `fetch_failed`, never bad data. Turns currency from a 45-day manual chore into an automated check for most of the catalog.
+
 ### Changed
 - **SC1 catalog refresh — the price table is current again (verified 2026-09-05), so the deployed server routes instead of refusing.** Fixed four providers whose model IDs had been retired and would fail at call time: Gemini (2.0-flash/1.5-pro → 3.5-flash/3.1-flash-lite/3.1-pro), DeepSeek (chat/reasoner → v4-flash/v4-pro), Grok (4/4.1-fast → 4.6/4.1-fast), Qwen (turbo → flash). Corrected all stale prices, incl. Anthropic Opus (was the retired $15/$75 → $5/$25) and every Mistral row. Applied the cheapest-current-model-per-tier rule; dropped Mistral Medium as strictly dominated by the now-cheaper Large. DeepSeek encoded at off-peak, Qwen at Singapore endpoint, all at standard context — the peak/region/long-context variance is noted for **SC4**.
 

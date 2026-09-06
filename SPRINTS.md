@@ -55,16 +55,6 @@ automated (SC2) first, and automation is pointless until the catalog is not
 broken (SC1). The one-model-per-tier limit and the manual staleness burden are
 the two forces that fight each other; this sequence resolves them.
 
-- **SC2 — Programmatic price source (OpenRouter feed).** Currency is fully manual
-  today, which is why a large catalog is dangerous. OpenRouter fronts hundreds of
-  models through one OpenAI-compatible endpoint **and publishes machine-readable
-  pricing** — exactly the `json_api` source S4b's `refresh.py` was built for but
-  had none of. Wire OpenRouter's price feed as a real drift source so
-  `arbitrage_check_price_drift` actually detects drift for the models it covers,
-  turning S4b from "all manual" into "automated where a feed exists." This is the
-  enabler: it makes keeping a catalog current a background check instead of a
-  six-weekly hand-verification. Depends on SC1 (fix before automate).
-
 - **SC3 — Multi-model catalog expansion.** Only safe *after* SC2 makes currency
   cheap. Today each tier is one model per provider — you can't express "this
   provider has three good options at different prices" (e.g. Mistral Large now
@@ -203,6 +193,7 @@ The through-line: a provider joins the core only if it's **token-priced and adds
 
 ## Closed
 
+- **SC2 — Programmatic price source (OpenRouter feed)** (2026-09-05) — refresh.py drift-checks 6 providers (Anthropic/OpenAI/Gemini/Mistral/DeepSeek/Grok) against OpenRouter's public /api/v1/models feed; one shared fetch, per-token->per-1M conversion, cache-read compared. Groq+Qwen stay manual (documented). Missing IDs / feed outage -> fetch_failed, never bad data. Currency now automated for most of the catalog instead of a 45-day manual chore. 8 tests (mocked feed; sandbox blocks openrouter.ai, runs live on MCPize).
 - **SC1 — Catalog refresh** (2026-09-05) — verified all 8 providers against current pricing; the table is current again so the deployed server routes instead of refusing. Replaced 4 providers' retired model IDs (Gemini, DeepSeek, Grok, Qwen) that would fail at call time; corrected all stale prices (Anthropic Opus $15/$75→$5/$25, all Mistral, o3 $10/$40→$2/$8). Cheapest-current-per-tier rule; Mistral Medium dropped (Large now cheaper). DeepSeek off-peak, Qwen Singapore, standard context — variance noted for SC4. verified_at=2026-09-05, guard now fresh. 6 stale-premise tests updated (shipped table is now fresh, not stale); Gemini gained verified cache pricing. 130 tests pass.
 - **S5 — Streaming completions** (2026-09-05) — route_completion 'stream' option consumes the provider SSE stream (anthropic + openai formats; gemini falls back). Streaming client layer (stream_provider/stream_supported). Reports time_to_first_token_ms. Failover is pre-first-token only — a mid-stream error is terminal (tagged _cheaprouter_stream_started), never retried, since partial output may be committed. MCP returns one final result; this is server-side streaming from the provider, not an MCP-level token stream. 7 tests.
 - **S3 — Prompt-caching awareness** (2026-09-05) — cost model prices cache-hit input tokens at each model's cache-read rate; cached_input_tokens hint on get_pricing/estimate_cost/route_completion. cached_input_price_per_1m in the table for anthropic/openai/deepseek; others bill cache tokens at full input rate (never advantaged). Can flip the winner on cache-heavy loads (proven: DeepSeek beats Groq at tier_fast under heavy caching). Estimates report cache_supported. Inherits S4a staleness. 10 tests.

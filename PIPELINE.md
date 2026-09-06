@@ -49,7 +49,7 @@ pointless until the catalog isn't broken.
    plus Qwen + Grok still to verify. Deliverable: verified current prices, cited,
    `verified_at` = today → **clears the guard, server routes again.**
 
-2. **SC2 — Programmatic price source (OpenRouter feed).** *Enabler.* OpenRouter
+2. **SC2 — Programmatic price source (OpenRouter feed).** ✅ *Shipped 2026-09-05.* OpenRouter
    publishes machine-readable pricing — the `json_api` source S4b's `refresh.py`
    was built for but has none of. Wiring it turns currency from a six-weekly
    hand-verification into an automated drift check. This is what makes a larger

@@ -57,7 +57,12 @@
         }
       },
       "refresh": {
-        "strategy": "manual"
+        "strategy": "openrouter",
+        "ids": {
+          "tier_fast": "anthropic/claude-haiku-4.5",
+          "tier_balanced": "anthropic/claude-sonnet-4.6",
+          "tier_powerful": "anthropic/claude-opus-4.6"
+        }
       }
     },
     "openai": {
@@ -90,7 +95,12 @@
         }
       },
       "refresh": {
-        "strategy": "manual"
+        "strategy": "openrouter",
+        "ids": {
+          "tier_fast": "openai/gpt-4o-mini",
+          "tier_balanced": "openai/gpt-4o",
+          "tier_powerful": "openai/o3"
+        }
       }
     },
     "gemini": {
@@ -123,7 +133,12 @@
         }
       },
       "refresh": {
-        "strategy": "manual"
+        "strategy": "openrouter",
+        "ids": {
+          "tier_fast": "google/gemini-3.5-flash",
+          "tier_balanced": "google/gemini-3.1-flash-lite",
+          "tier_powerful": "google/gemini-3.1-pro"
+        }
       }
     },
     "groq": {
@@ -183,7 +198,12 @@
         }
       },
       "refresh": {
-        "strategy": "manual"
+        "strategy": "openrouter",
+        "ids": {
+          "tier_fast": "mistralai/mistral-small",
+          "tier_balanced": "mistralai/mistral-large",
+          "tier_powerful": "mistralai/mistral-large"
+        }
       }
     },
     "deepseek": {
@@ -216,7 +236,12 @@
         }
       },
       "refresh": {
-        "strategy": "manual"
+        "strategy": "openrouter",
+        "ids": {
+          "tier_fast": "deepseek/deepseek-v4-flash",
+          "tier_balanced": "deepseek/deepseek-v4-flash",
+          "tier_powerful": "deepseek/deepseek-v4-pro"
+        }
       }
     },
     "qwen": {
@@ -279,9 +304,14 @@
         }
       },
       "refresh": {
-        "strategy": "manual"
+        "strategy": "openrouter",
+        "ids": {
+          "tier_fast": "x-ai/grok-4.1-fast",
+          "tier_balanced": "x-ai/grok-4.3",
+          "tier_powerful": "x-ai/grok-4.6"
+        }
       }
     }
   },
-  "refresh_note": "Each provider has a 'refresh' block. strategy='manual' means prices must be verified by a human against the provider's pricing_url. strategy='json_api' adds 'url' and 'map' ({tier:{field:[json path]}}) for programmatic drift checks via refresh.check_drift(). The refresh path proposes changes for review; it never writes prices.json or advances verified_at automatically."
+  "refresh_note": "Each provider has a 'refresh' block. strategy='manual' means prices must be verified by a human against the provider's pricing_url. strategy='json_api' adds 'url' and 'map' ({tier:{field:[json path]}}) for programmatic drift checks via refresh.check_drift(). The refresh path proposes changes for review; it never writes prices.json or advances verified_at automatically. SC2: providers with an 'openrouter' strategy are drift-checked against the OpenRouter /api/v1/models feed (per-token prices x1e6 to per-1M). Groq stays manual (OpenRouter prices the open model, not Groq's specific hosting, so a comparison would be apples-to-oranges). Qwen stays manual (unstable OpenRouter ids for the current Qwen3.x lineup)."
 }
