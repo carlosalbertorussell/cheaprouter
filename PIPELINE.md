@@ -108,6 +108,19 @@ DeepSeek/Qwen (except as SC3 model candidates), enterprise gateways
 (Together/Fireworks — Groq covers the lane). OpenRouter is the sole exception,
 as a pricing *source* (SC2), not for coverage.
 
+## Strategic fork — CheapRouter Pricing (SP-series, blueprint stage)
+
+A center-of-gravity option: make **verified price-truth** a product in its own
+right — a second MCP server (*CheapRouter Pricing*) in this same repo, **tied at
+the waist** to the router (shared price-truth spine, distinct tool surfaces,
+bidirectional metadata-only enrichment). The market has no single source of
+pricing truth; the rigor cheaprouter already has (provenance, staleness guard,
+no-invented-prices) is the methodology a reference source needs. Full design in
+**`PRICING_SERVER_BLUEPRINT.md`**; build sequence SP1a–SP1e. Introduces a third
+provenance tier (**observed**, from real routing) and price-history tracking —
+the citable series no scraper keeps well. Docs-first; nothing built until the
+blueprint is reviewed.
+
 ## Beyond the current roadmap (not yet sprints)
 
 - **Pro tier packaging.** S1 built the analytics foundation, but the price,
