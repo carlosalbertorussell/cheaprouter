@@ -523,6 +523,24 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
     actual_output_cost = (completion.output_tokens_used / 1_000_000) * model.output_price_per_1m
     actual_total_cost = actual_input_cost + actual_output_cost
 
+    # SP1d — waist interaction: publish the OBSERVED signal (metadata-only) to the
+    # shared price-history spine. This is the effective per-1M unit rate the real
+    # call was billed at — a validation/drift signal for the pricing side, NEVER a
+    # published price. Opt-in via ARBITRAGE_EMIT_OBSERVED to avoid overhead by
+    # default. Carries only provider/model/tier/unit-price — no content, no keys.
+    if os.getenv("ARBITRAGE_EMIT_OBSERVED", "").strip() in ("1", "true", "TRUE", "yes"):
+        try:
+            from price_history import record_observed
+            record_observed(
+                provider=used.provider_id,
+                model_id=completion.model_id,
+                tier=params.tier,
+                observed_input_per_1m=model.input_price_per_1m,
+                observed_output_per_1m=model.output_price_per_1m,
+            )
+        except Exception:
+            pass  # observed signal is best-effort; never affects the response
+
     result = {
         "response": completion.text,
         "routing": {

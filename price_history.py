@@ -204,3 +204,51 @@ def summary(limit: int = 1000) -> dict:
         "changes_by_provider": dict(by_provider),
         "most_recent": rows[0].get("ts"),
     }
+
+
+# ─── Observed signal (SP1d — the waist interaction) ───────────────────────────
+#
+# The router, after a real completion, knows what the call ACTUALLY cost. It
+# records that here as an OBSERVED-tier entry — the empirical ground truth. This
+# is a validation/drift SIGNAL, never a published price: an observed cost may be a
+# caller's negotiated (SC5) or off-peak/regional (SC4) rate, so it can inform and
+# challenge the verified table but must never auto-become a list price.
+#
+# CROSSING THE WAIST: this is the router writing to the shared spine (this module),
+# NOT calling the pricing server. Tied at the waist (shared module), not entangled
+# (no server-to-server call) — either server still stands alone. And it is
+# METADATA ONLY: provider, model, tier, per-1M unit cost, timestamp. Never tokens
+# of content, never keys. build_entry()/_sanitize() enforce the schema.
+
+def record_observed(
+    *, provider: str, model_id: str, tier: str,
+    observed_input_per_1m: Optional[float] = None,
+    observed_output_per_1m: Optional[float] = None,
+    backend: Optional[HistoryBackend] = None,
+) -> list[dict]:
+    """
+    Record what a real completion effectively cost, as OBSERVED-tier history.
+
+    The caller passes *effective per-1M unit prices* already derived from the
+    completion's real cost and token counts — NOT raw usage, and never content or
+    keys. Stored with provenance_tier='observed', source='router'. Returns the
+    entries written (one per field supplied).
+    """
+    be = backend or get_backend()
+    out = []
+    for field, val in (("input_price_per_1m", observed_input_per_1m),
+                       ("output_price_per_1m", observed_output_per_1m)):
+        if val is None:
+            continue
+        e = build_entry(provider=provider, model_id=model_id, tier=tier, field=field,
+                        old=None, new=float(val), provenance_tier="observed", source="router")
+        be.append(e)
+        out.append(e)
+    return out
+
+
+def observed_entries(provider: Optional[str] = None, model_id: Optional[str] = None,
+                     limit: int = 1000) -> list[dict]:
+    """Recent OBSERVED-tier entries only (the empirical signal), newest first."""
+    return [r for r in get_backend().read(provider, model_id, limit)
+            if r.get("provenance_tier") == "observed"]
