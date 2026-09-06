@@ -1,0 +1,131 @@
+# Strategy — CheapRouter Pricing: publishing & monetization
+
+Companion to `PRICING_SERVER_BLUEPRINT.md`. The blueprint is the *architecture*
+(how the pricing server works). This is the *business* (how the data is published
+and monetized). Kept separate on purpose: the pricing model will change many times
+before the architecture does — different lifespans, different docs.
+
+Status: STRATEGY NOTES, not commitments. Options and direction, recorded so the
+build can be shaped by where it's headed. Nothing here is decided-final except
+the top-line direction.
+
+---
+
+## Direction (decided): tiered — free real-time feed → paid certified/attestation
+
+Two tiers of the **same data at different provenance depths** — NOT two separate
+data operations. This is the load-bearing idea: if the free and paid tiers were
+different datasets, we'd be running two businesses. They are one dataset, exposed
+at two levels of the provenance model the blueprint already defines.
+
+- **Free tier — real-time feed (top of funnel).** The current price table
+  (`verified` + `proxy` tiers) as an open feed: HTTP `GET /prices`, dated JSON
+  snapshot, the pricing MCP's read tools. Broad reach, drives adoption, builds
+  the reputation the paid tier sells on. This is the *commodity* lane — it
+  competes with OpenRouter/trackers on freshness and coverage, and that's fine
+  because it's the funnel, not the product.
+- **Paid tier — certified / attestation (the product).** The *same* prices, plus
+  the attestation layer: signed & dated snapshots citable in a contract or audit,
+  full source trail, confidence scoring, the `price_history` series, and change
+  alerts. This is the *trust* lane — defensible, no incumbent, and aligned with
+  the governance/risk/board credibility that is Carlos's actual moat.
+
+**Why this shape works:** free real-time is a race-to-zero commodity on its own,
+and certified-only has no funnel. Tiered, the commodity feed *feeds* the trust
+product — adoption of the free feed is what makes the certified snapshot worth
+citing ("the source everyone uses, now signed and dated for your audit").
+
+## The moat is certification, not data
+
+Everyone in this space *publishes* prices (OpenRouter, the tracker sites). Almost
+no one *certifies* them — stands behind a number with a methodology and provenance
+trail the way an auditor stands behind a financial statement. That attestation
+slot is essentially unoccupied, and it fits Carlos's risk/governance/board-advisory
+credibility better than a real-time feed ever could.
+
+The blueprint's provenance tiers (`verified` / `proxy` / `observed`) are already
+the skeleton of an attestation framework — built before it was named that. The
+paid product deepens exactly that skeleton: who verified, against what source,
+when, with what confidence, and how it has moved over time.
+
+## Publishing / distribution options (menu, not commitments)
+
+Free-tier reach:
+- **Public HTTP price API + dated JSON snapshot** — reaches every developer and
+  dashboard, not just MCP clients. The OpenRouter-shaped distribution.
+- **Pricing MCP in a registry/marketplace** — distribution via the (early,
+  uncrowded) MCP ecosystem.
+- **"Verified by" badge / embeddable widget** — provenance layer *under* other
+  people's pages; distribution through the existing ecosystem, high credibility.
+
+Paid-tier products:
+- **Certified snapshot licensing** — dated, signed, provenanced price sheet,
+  citable in contract/audit. Per-snapshot or subscription. The core certified play.
+- **Historical dataset** (`price_history`) — the provenanced time series of LLM
+  price movement, licensed. Genuinely scarce; sells to analysts, procurement,
+  researchers, AI-cost due-diligence (Carlos's world).
+- **Change-alert / webhook subscriptions** — "notify me the moment a provider
+  reprices." Real procurement pain, clear willingness to pay (today they find out
+  on the invoice).
+- **Attestation-as-a-service** — verify & certify *someone else's* stated pricing
+  claims (a vendor's rates, a FinOps tool's numbers). The most differentiated,
+  most Carlos-shaped option: a ratings/attestation business, not a data feed.
+- **Embedded / OEM** — other tools (routers, dashboards, FinOps platforms) license
+  the feed as their pricing backend. B2B2C reach; become infrastructure.
+- **API SLA tiers** — free feed; paid adds freshness SLA, rate limits, uptime
+  guarantee. Standard data-API model; the commodity monetization, thin.
+
+## Monetization fit (honest ranking for Carlos specifically)
+
+1. **Attestation-as-a-service** — most differentiated, no incumbent, maps directly
+   onto governance/board credibility. Closest to an auditor's business.
+2. **Certified snapshot licensing** — the productized version of #1; defensibility
+   is what's sold, not data.
+3. **Historical dataset** — scarce, citable, one-time or subscription.
+4. **Change-alerts** — underrated, real pain, clear buyer (procurement/finance).
+5. **Embedded/OEM** — good reach, less differentiated.
+6. **API SLA tiers** — commodity; fine as free-funnel + light paid, not the business.
+
+## The discipline this requires (non-negotiable)
+
+Every monetization option above adds a **promise**, and promises about data have
+teeth:
+- A certified snapshot someone cites in a contract → an error is a **liability**,
+  not a bug.
+- A freshness SLA → downtime is a **breach**.
+- An attestation → you are **standing behind** a number.
+
+This is why the blueprint's discipline is the *only* safe foundation for any of
+this: provenance, refuse-rather-than-lie, no-invented-prices. Note the direction
+each tier pulls:
+- **Real-time/commodity monetization tempts you to LOOSEN** discipline for
+  coverage and speed.
+- **Certified/attestation monetization REQUIRES you to tighten it.**
+
+The tiered model must resolve this in favour of tightening: the free feed may be
+best-effort, but **anything sold — anything with the word "certified" on it — is
+held to the full provenance standard.** The free tier's looseness must never
+contaminate the paid tier's guarantee. (Architecturally: the `observed`/`proxy`
+tiers can be looser; the `verified` tier that backs certification cannot.)
+
+## What this means for the build (SP-series)
+
+- The **free feed** is mostly the existing table exposed via new surfaces (HTTP +
+  MCP read tools) — light lift, mostly SP1c.
+- The **paid product** needs the attestation layer built *deeper* than a router
+  ever required: signed/dated snapshots, confidence scoring, the source trail as
+  a first-class field, and `price_history` (SP1b) as the dataset spine.
+- So the tiered decision *sharpens* SP1: build the provenance/attestation model to
+  certification depth from the start (SP1a), because the paid product is that
+  model — not a feature added later.
+
+## Open strategic questions (for Carlos, later — not build-blocking)
+
+1. **Signing:** does a certified snapshot need cryptographic signing (a real
+   signature/hash chain) to be citable, or is a dated provenance trail enough?
+2. **Liability posture:** what does "certified" actually warrant? (This is a legal
+   question as much as a product one — Carlos's governance lens applies.)
+3. **Attestation scope:** verify only the 8 curated providers, or offer to certify
+   arbitrary third-party pricing claims (the bigger, harder attestation business)?
+4. **Pricing of the paid tier:** per-snapshot, subscription, per-seat, per-query?
+   (Deliberately unanswered — this is the part that changes ten times.)
