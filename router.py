@@ -66,6 +66,7 @@ def route(
     allowed_regions: Optional[list[str]] = None,
     health_aware: bool = True,
     health_snapshot: Optional[dict] = None,
+    cached_input_tokens: int = 0,
 ) -> RoutingDecision:
     """
     Select the cheapest available provider for the given tier and constraints.
@@ -95,7 +96,7 @@ def route(
         raise ValueError(f"Invalid tier '{tier}'. Valid: {sorted(VALID_TIERS)}")
 
     excluded_ids = set(excluded_providers or [])
-    all_estimates = estimate_all_providers(providers, tier, input_tokens, output_tokens, user_keys)
+    all_estimates = estimate_all_providers(providers, tier, input_tokens, output_tokens, user_keys, cached_input_tokens)
 
     pool: list[CostEstimate] = []
     excluded: list[dict] = []

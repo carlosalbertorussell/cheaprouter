@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **S3 prompt-caching awareness.** The cost model now accounts for provider prompt caching: a new `cached_input_tokens` hint on `arbitrage_get_pricing`, `arbitrage_estimate_cost`, and `arbitrage_route_completion` prices cache-hit input tokens at each model's cache-read rate. Anthropic, OpenAI, and DeepSeek carry `cached_input_price_per_1m` in the table; providers without a cache offering bill cached tokens at the full input rate (never wrongly advantaged). On cache-heavy workloads this can flip which provider is cheapest — e.g. DeepSeek's cache-read pricing can beat a nominally cheaper no-cache provider. Estimates report `cached_input_tokens` and `cache_supported`. Cache prices are the same unverified mid-2025 vintage as the rest of the table and inherit the S4a staleness guard.
+
+### Added
 - **S4b price refresh path.** New `refresh.py` + `arbitrage_check_price_drift` tool compare fetchable provider prices against the table and report drift, so the S4a staleness guard can be cleared with a reviewed diff instead of blind hand-editing. Each provider declares a `refresh` strategy in prices.json (`json_api` = fetchable, `manual` = human-verified); all ship `manual` today since no verified programmatic source exists. The path **never writes prices.json and never advances verified_at** — it proposes a candidate for human review; no price is invented or silently accepted. New `scripts/refresh_prices.py` (exit 1 on drift) for CI/cron.
 
 ### Added

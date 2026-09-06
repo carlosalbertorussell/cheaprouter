@@ -57,6 +57,8 @@ mcp = FastMCP(
 
 TIER_DESC = "Capability tier: 'tier_fast' (cheap/fast), 'tier_balanced' (mid-range), 'tier_powerful' (flagship)"
 
+CACHE_DESC = "Of input_tokens, how many are expected to be cache hits. Providers with cache pricing (Anthropic, OpenAI, DeepSeek) bill these far cheaper, which can change which provider is cheapest. Providers without cache pricing bill them at the full input rate. Default 0."
+
 API_KEYS_DESC = (
     "Your provider API keys as a dict. Supply only the providers you want eligible. "
     'Example: {"anthropic": "sk-ant-...", "openai": "sk-...", "groq": "gsk_...", '
@@ -75,6 +77,7 @@ class GetPricingInput(BaseModel):
     tier: str = Field(..., description=TIER_DESC)
     input_tokens: int = Field(1000, description="Estimated input token count", ge=1, le=2_000_000)
     output_tokens: int = Field(500, description="Estimated output token count", ge=1, le=500_000)
+    cached_input_tokens: int = Field(0, description=CACHE_DESC, ge=0, le=2_000_000)
     api_keys: dict[str, str] = Field(default_factory=dict, description=API_KEYS_DESC)
 
     @field_validator("tier")
@@ -91,6 +94,7 @@ class EstimateCostInput(BaseModel):
     tier: str = Field(..., description=TIER_DESC)
     input_tokens: int = Field(..., description="Estimated input token count", ge=1, le=2_000_000)
     output_tokens: int = Field(..., description="Estimated output token count", ge=1, le=500_000)
+    cached_input_tokens: int = Field(0, description=CACHE_DESC, ge=0, le=2_000_000)
     api_keys: dict[str, str] = Field(default_factory=dict, description=API_KEYS_DESC)
     latency_sensitive: bool = Field(False, description="Exclude high-latency providers (>300ms, mainly CN region)")
     excluded_providers: list[str] = Field(default_factory=list, description="Provider IDs to exclude")
@@ -116,6 +120,7 @@ class RouteCompletionInput(BaseModel):
     excluded_providers: list[str] = Field(default_factory=list, description="Provider IDs to skip")
     allowed_regions: Optional[list[str]] = Field(None, description="Restrict routing to these regions")
     estimated_output_tokens: int = Field(500, description="Estimated output tokens for pre-flight cost routing", ge=1, le=500_000)
+    cached_input_tokens: int = Field(0, description=CACHE_DESC, ge=0, le=2_000_000)
     session: Optional[str] = Field(None, description="Opaque session token to attribute spend to you. Reused across requests to track your own cumulative spend; never mapped to your identity.")
     health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind healthy providers of similar price, but never excluded. Set False for pure cheapest-first routing.")
     max_failover: int = Field(2, description="On a transient error (429/5xx/timeout), how many additional providers to try, in ranked order, before giving up. 0 disables failover. Non-transient errors (bad key, bad request) never fail over.", ge=0, le=7)
@@ -224,7 +229,7 @@ async def arbitrage_get_pricing(params: GetPricingInput) -> str:
     Returns:
         str: Markdown table sorted cheapest first, plus a cost spread summary.
     """
-    estimates = estimate_all_providers(PROVIDERS, params.tier, params.input_tokens, params.output_tokens, params.api_keys)
+    estimates = estimate_all_providers(PROVIDERS, params.tier, params.input_tokens, params.output_tokens, params.api_keys, params.cached_input_tokens)
     table = format_pricing_table(estimates)
 
     cheapest = estimates[0]
@@ -300,6 +305,7 @@ async def arbitrage_estimate_cost(params: EstimateCostInput) -> str:
         latency_sensitive=params.latency_sensitive,
         excluded_providers=params.excluded_providers,
         allowed_regions=params.allowed_regions,
+        cached_input_tokens=params.cached_input_tokens,
     )
 
     if not decision.winner:
@@ -363,6 +369,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         excluded_providers=params.excluded_providers,
         allowed_regions=params.allowed_regions,
         health_aware=params.health_aware,
+        cached_input_tokens=params.cached_input_tokens,
     )
 
     if not decision.winner:
