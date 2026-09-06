@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Docs accuracy pass (pre-discovery).** Brought MCPize-facing docs in line with shipped reality before pursuing registry/discovery: `mcpize.yaml` refreshed (7→8 providers incl. Grok, description now reflects health/failover/caching/streaming/analytics, current env vars, v1.1.0); `MCPIZE_DOCS.md` gained a **CheapRouter Pricing** section documenting the 5 `pricing_*` tools of the second server, fixed 'seven'→'eight', and replaced retired model names (Gemini 1.5/2.5, DeepSeek R1, Qwen Turbo) in the tier table + FAQ with the current SC1 lineup; `README.md` provider table corrected to the actual current model IDs (it had listed retired gemini-2.0-flash / deepseek-chat / etc.). No code change.
+
 ### Added
 - **SP1d — the waist interaction (observed signal).** The router now publishes what a real completion effectively cost as an `observed`-tier signal across the shared price-history spine (opt-in via `ARBITRAGE_EMIT_OBSERVED`, metadata-only — provider, model, tier, per-1M unit price; never tokens-of-content or keys). New `price_history.record_observed()` + `observed_entries()`; `refresh.observed_validation()` compares observed cost to the verified table (confirms / diverges, >15% flags re-verify); new `pricing_observed` tool surfaces it. **Observed never becomes a price** — it validates or challenges the verified tier, never promotes into it (`provenance.can_promote` is always False). Tied at the waist via a shared module, NOT a server-to-server call — each server still stands alone. Router behaviour unchanged (emit off by default); 183 tests.
 
