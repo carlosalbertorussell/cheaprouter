@@ -47,6 +47,48 @@ no data to build budget alerts on. This is the load-bearing task for monetizatio
 
 Prioritized. Top of list = next candidate after S1. Each is a sprint-sized unit.
 
+### Catalog & currency — do in this order (each enables the next)
+
+These three are a dependency chain, not independent picks. Building them out of
+order is a trap: a bigger catalog (SC3) is a millstone unless currency is
+automated (SC2) first, and automation is pointless until the catalog is not
+broken (SC1). The one-model-per-tier limit and the manual staleness burden are
+the two forces that fight each other; this sequence resolves them.
+
+- **SC1 — Catalog refresh (fix the eight).** The verification pass (2026-09-05,
+  see `CATALOG_REFRESH.md`) found the model catalog ~14 months stale: Gemini
+  (2.0-flash / 1.5-pro) and DeepSeek (chat / reasoner) model IDs are **retired
+  and fail at call time**; Anthropic's Opus tier carries the retired $15/$75 rate
+  (Opus 4.6 is $5/$25); Mistral prices are all wrong; OpenAI o3 has a source
+  conflict; Groq is fine. **Blocked on Carlos's tier-mapping decisions** (which
+  current model → fast/balanced/powerful per provider — see CATALOG_REFRESH.md
+  §"Decisions needed"). Once decided: verify each chosen model's current price
+  from its provider page (cite it), update prices.json, set verified_at to today,
+  PR for review. Clears the S4a staleness guard and gets the deployed server
+  routing again. No invented prices, no silently-chosen models. Qwen + Grok still
+  need verifying as part of this. **This is the immediate priority — three
+  providers are broken right now.**
+
+- **SC2 — Programmatic price source (OpenRouter feed).** Currency is fully manual
+  today, which is why a large catalog is dangerous. OpenRouter fronts hundreds of
+  models through one OpenAI-compatible endpoint **and publishes machine-readable
+  pricing** — exactly the `json_api` source S4b's `refresh.py` was built for but
+  had none of. Wire OpenRouter's price feed as a real drift source so
+  `arbitrage_check_price_drift` actually detects drift for the models it covers,
+  turning S4b from "all manual" into "automated where a feed exists." This is the
+  enabler: it makes keeping a catalog current a background check instead of a
+  six-weekly hand-verification. Depends on SC1 (fix before automate).
+
+- **SC3 — Multi-model catalog expansion.** Only safe *after* SC2 makes currency
+  cheap. Today each tier is one model per provider — you can't express "this
+  provider has three good options at different prices" (e.g. Mistral Large now
+  undercuts Mistral Medium; DeepSeek V4 Flash beats mid-tier models). Two parts:
+  (a) let a provider expose **multiple models per tier** (or fold into S7 capability
+  scoring and drop rigid tiers), and (b) add newer models across the current eight
+  providers. Comprehensiveness is the payoff, but it only stays honest because SC2
+  keeps it current automatically. Depends on SC2. Deliberately NOT about adding
+  new providers — that's separate and mostly stays deferred (see below).
+
 ### High value — extends the arbitrage thesis
 
 
@@ -86,6 +128,18 @@ Prioritized. Top of list = next candidate after S1. Each is a sprint-sized unit.
 
 ### Deferred / out of scope
 
+- **New providers** (distinct from SC3, which expands models *within* the current
+  eight). These stay deferred unless a specific need pulls one in:
+  - Chinese labs beyond DeepSeek/Qwen — Moonshot (Kimi K2), Zhipu (GLM),
+    ByteDance (Doubao). Same deferral as the project's first scoping decision.
+  - Enterprise gateways — AWS Bedrock, Azure OpenAI, Google Vertex. Only if the
+    Enterprise tier becomes real; then they're a data-residency *feature*, not a
+    catalog entry.
+  - Other open-model hosts — Together AI, Fireworks. Groq already covers this lane.
+  - OpenRouter is the one exception, but as a *pricing source* (SC2), not for
+    model coverage — see the Catalog & currency block.
+  The value is a curated apples-to-apples set, not maximum coverage: every added
+  provider is another price to keep current every 45 days.
 - Multi-modal routing (images, audio) — different cost model, revisit if demand appears
 - Fine-tuning / model management — separate product
 - Agentic orchestration — that's what clients build *on top of* cheaprouter, not this layer
