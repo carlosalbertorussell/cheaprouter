@@ -89,6 +89,30 @@ the two forces that fight each other; this sequence resolves them.
   keeps it current automatically. Depends on SC2. Deliberately NOT about adding
   new providers — that's separate and mostly stays deferred (see below).
 
+- **SC4 — Variable / jurisdictional pricing schema.** The one-price-per-model
+  schema flattens away real, structured price variation that the arbitrage engine
+  should be *using*, not ignoring. Three axes found during the SC1 verification
+  (2026-09-05), each large enough to flip a routing decision:
+    - **Time-of-day** — DeepSeek bills peak (01:00–04:00, 06:00–10:00 UTC) at ~2x
+      off-peak. SC1 encodes off-peak (the conservative, typical case) and notes it;
+      SC4 would let routing send cost-tolerant work to DeepSeek off-peak.
+    - **Region / jurisdiction** — same model, different price by endpoint. Qwen
+      prices differ across Singapore / Beijing / Tokyo / Frankfurt / Virginia;
+      OpenAI adds a **10% data-residency uplift** on regional endpoints for models
+      released on/after 2026-03-05. This is the jurisdictional axis: a request's
+      required data residency changes which provider is actually cheapest.
+    - **Long-context tier** — Gemini, Anthropic, Grok, and OpenAI's flagships all
+      apply a higher meter once a prompt crosses ~200K tokens (often ~2x). SC1
+      encodes the standard-context rate; SC4 would apply the cliff by request size.
+  **Threshold-gated:** model a variation only when it's large enough to change a
+  routing decision (DeepSeek's 2x qualifies; a 5% regional wobble does not) — else
+  we rebuild the sprawl-vs-currency problem the whole chain is disciplined against.
+  Touches the prices.json schema and CostEstimate.compute, so it composes with S3
+  caching and S1 savings. **Best sequenced after SC2** — a programmatic feed that
+  already reports these variations tells us which are worth modelling, rather than
+  hand-encoding time-of-day/region tables that then go stale. Depends on SC2;
+  natural sibling of SC3.
+
 ### High value — extends the arbitrage thesis
 
 

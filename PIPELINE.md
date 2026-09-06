@@ -117,8 +117,7 @@ as a pricing *source* (SC2), not for coverage.
 - **Enterprise tier.** Where the deferred gateways (Azure/Bedrock/Vertex), data
   residency controls, audit logging, and compliance reporting would live. A
   sales-led motion more than a feature flag; the deferred-provider notes point here.
-- **Schema extensions for exotic pricing.** DeepSeek's peak/off-peak and
-  Gemini/Anthropic's >200K-token surcharges don't fit the one-price-per-model
-  schema. SC1 encodes the standard/off-peak case and notes the rest; a
-  time-of-day or context-tier pricing schema would be its own later sprint if it
-  proves worth it.
+- **Schema extensions for exotic pricing** — now scoped as **SC4** (see the
+  catalog chain above). Covers time-of-day, region/jurisdiction, and long-context
+  pricing, threshold-gated. SC1 ships the conservative single number; SC4 models
+  the variance.
