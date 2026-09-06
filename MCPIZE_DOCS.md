@@ -34,7 +34,7 @@ Once installed via MCPize, connect using your MCP client's remote server URL fie
 
 ## Providers
 
-cheaprouter supports seven providers across three regions:
+cheaprouter supports eight providers across three regions:
 
 | Provider | Region | API key field |
 |----------|--------|---------------|
@@ -59,9 +59,9 @@ to semantically equivalent models across all providers:
 
 | Tier | Best for | Example models |
 |------|----------|----------------|
-| `tier_fast` | Simple tasks, high volume, cost-sensitive | Haiku, GPT-4o mini, Gemini Flash, Llama 8B, Qwen Turbo |
-| `tier_balanced` | Most everyday tasks | Sonnet, GPT-4o, Gemini 1.5 Pro, Llama 70B, Qwen Plus |
-| `tier_powerful` | Complex reasoning, long context | Opus, o3, Gemini 2.5 Pro, DeepSeek R1, Qwen Max |
+| `tier_fast` | Simple tasks, high volume, cost-sensitive | Haiku 4.5, GPT-4o mini, Gemini 3.5 Flash, Llama 3.1 8B, Qwen Flash, DeepSeek V4 Flash, Grok 4.1 Fast |
+| `tier_balanced` | Most everyday tasks | Sonnet 4.6, GPT-4o, Gemini 3.1 Flash-Lite, Llama 3.3 70B, Qwen Plus, DeepSeek V4 Flash, Grok 4.3 |
+| `tier_powerful` | Complex reasoning, long context | Opus 4.6, o3, Gemini 3.1 Pro, Mistral Large 3, DeepSeek V4 Pro, Qwen Max, Grok 4.6 |
 
 ---
 
@@ -435,14 +435,14 @@ the numbers in `prices.json`, and set `verified_at` to today's date.
 
 ## FAQ
 
-**Do I need keys for all seven providers?**
+**Do I need keys for all eight providers?**
 No. cheaprouter works with any subset. Providers without a key are automatically
 excluded from routing. Start with one or two and add more as you get accounts.
 
 **Which providers give the best savings?**
-It depends on the tier. At `tier_fast`, Groq and Qwen Turbo are typically the
+It depends on the tier. At `tier_fast`, Groq and Qwen Flash are typically the
 cheapest. At `tier_balanced`, DeepSeek V3 often wins by a wide margin. At
-`tier_powerful`, DeepSeek R1 undercuts Western flagship models significantly.
+`tier_powerful`, DeepSeek V4 Pro undercuts Western flagship models significantly.
 
 **What does `latency_sensitive` actually do?**
 It excludes providers whose estimated round-trip latency exceeds 300ms. From
@@ -460,3 +460,77 @@ Yes — pass `excluded_providers: ["openai"]` or any combination of provider IDs
 **Are there rate limits on cheaprouter itself?**
 No. cheaprouter makes direct API calls to your chosen providers using your keys.
 Any rate limits are those imposed by the providers on your account.
+
+---
+
+# CheapRouter Pricing — the second server
+
+cheaprouter ships a **second, separate MCP server** — *CheapRouter Pricing*
+(`pricing_server.py`, deployed via `mcpize.pricing.yaml`). Where the router
+*consumes* prices to route, this server *serves the price truth itself* as a
+product: the current verified price table, how it disagrees with a live feed, and
+how prices have moved over time. It adds no routing and needs no API keys — it is
+a read-only reference in this release.
+
+**Provenance-first:** every response leads with a provenance block — the trust
+`tier` (`verified` = human-checked and citable; `proxy` = third-party feed;
+`observed` = empirical from real routing), plus `verified_at`, source, and
+staleness. Only the `verified` tier is authoritative.
+
+## Pricing tools
+
+### `pricing_get`
+Verified price for one provider + capability tier, provenance-first.
+```json
+{ "provider": "deepseek", "tier": "tier_balanced" }
+```
+Returns the provenance block + input/output/cache prices for that model.
+
+### `pricing_list`
+The whole current verified table (optional `tier` filter).
+```json
+{ "tier": "tier_fast" }
+```
+
+### `pricing_drift`
+Where the OpenRouter feed currently disagrees with the verified table — a
+**re-verify signal**, never an auto-update (the verified tier only advances by a
+human action). Optional `provider` filter.
+```json
+{ "provider": "anthropic" }
+```
+
+### `pricing_history`
+How prices have changed over time — the citable, provenanced series. Pass
+`trajectory_only` with a `provider` + `model_id` for a clean oldest→newest price
+series.
+```json
+{ "provider": "deepseek", "model_id": "deepseek-v4-flash", "trajectory_only": true }
+```
+
+### `pricing_observed`
+Validates the verified table against **observed** signals — what real completions
+actually cost, published by the router (when `ARBITRAGE_EMIT_OBSERVED` is on).
+Reports `confirms` / `diverges` per point; a material divergence is a re-verify
+signal. Never changes a price.
+```json
+{ "limit": 500 }
+```
+
+## Deployment
+
+Deployed from the same repo as the router via `mcpize.pricing.yaml`, on a distinct
+port (`PRICING_PORT`, default 8082), so both servers run side by side. Price
+history persists to the versioned `price_history.jsonl` by default (git is its
+audit log); override `PRICE_HISTORY_FILE` for an external store.
+
+## Provenance & limits
+
+- The three tiers are a **hierarchy of trust, never blended.** `proxy` and
+  `observed` data inform and challenge the `verified` tier but never
+  auto-promote into it — verification is a human act.
+- Read-only in this release. A human verification/attestation write path is
+  planned but not yet shipped.
+- Prices are the same versioned, staleness-guarded table the router uses;
+  "verified" means human-checked against provider pages as of `verified_at`, not
+  a real-time quote.

@@ -1,6 +1,6 @@
 name: cheaprouter
-version: 1.0.0
-description: "Routes LLM completion requests to the cheapest available provider across Anthropic, OpenAI, Gemini, Groq, Mistral, DeepSeek, and Qwen. BYOK — users supply their own provider keys per request."
+version: 1.1.0
+description: "BYOK MCP router that sends each LLM completion to the cheapest capable provider across 8 providers (Anthropic, OpenAI, Google Gemini, Groq, Mistral, DeepSeek, Alibaba Qwen, xAI Grok). Cheapest-per-tier routing with prompt-caching-aware costing, accurate token counting, provider health tracking, automatic failover, optional streaming, and per-session spend analytics + budgets. Users supply their own provider keys per request; the server stores no keys and no content. Prices are versioned and staleness-guarded — routing refuses on stale prices rather than misprice."
 runtime: python
 entrypoint: server.py
 
@@ -8,7 +8,23 @@ build:
   command: pip install -r requirements.txt
 
 env:
-  LATENCY_THRESHOLD_MS: "300"
-  BLOCKED_REGIONS: ""
-  ARBITRAGE_HISTORY_FILE: "/tmp/routing_history.jsonl"
+  # Routing
+  LATENCY_THRESHOLD_MS: "300"       # exclude providers slower than this when latency_sensitive
+  BLOCKED_REGIONS: ""               # comma-sep regions to hard-block, e.g. "cn"
   PORT: "8081"
+
+  # Provider health (S8) — tuning; sane defaults, override only if needed
+  HEALTH_WINDOW: "50"
+  HEALTH_MIN_SAMPLES: "3"
+  HEALTH_THRESHOLD: "0.5"
+
+  # Spend analytics (S1) — set both to persist across redeploys; else ephemeral JSONL
+  # UPSTASH_REDIS_REST_URL: ""
+  # UPSTASH_REDIS_REST_TOKEN: ""
+  ARBITRAGE_HISTORY_FILE: "/tmp/routing_history.jsonl"
+
+  # Price-table guard (S4a) — set to "1" to route on stale prices with a warning
+  ARBITRAGE_ALLOW_STALE_PRICES: ""
+
+  # Waist interaction (SP1d) — set to "1" to emit observed price signals to history
+  ARBITRAGE_EMIT_OBSERVED: ""
