@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "verified_at": "2025-06-30",
-  "verified_by": "Imported unverified from the original hardcoded providers.py literals (README dated them 'approximately mid-2025'). Values have NOT been checked against live provider pricing pages. verified_at is the honest date implied by that note, not a current verification.",
+  "verified_at": "2026-09-05",
+  "verified_by": "Verified 2026-09-05 against current provider pricing via web research (SC1 catalog refresh, see CATALOG_REFRESH.md). Cheapest-current-model-per-tier rule applied. Retired model IDs replaced (Gemini 2.0/1.5, DeepSeek chat/reasoner, Grok 4/4.1-fast, Qwen turbo). DeepSeek encoded at OFF-PEAK rates (peak ~2x, 01:00-04:00 & 06:00-10:00 UTC) and Qwen at International/Singapore endpoint \u2014 variance to be modelled in SC4. Prices move often; re-verify before the guard expires.",
   "max_age_days": 45,
   "currency": "USD",
   "unit": "per_1m_tokens",
@@ -13,11 +13,15 @@
     "mistral": "https://mistral.ai/technology/",
     "deepseek": "https://api-docs.deepseek.com/quick_start/pricing",
     "qwen": "https://www.alibabacloud.com/help/en/model-studio/models",
-    "grok": null
+    "grok": "https://docs.x.ai/docs/models"
   },
   "notes": {
-    "grok": "No official pricing URL was ever recorded in the README for xAI Grok. Its numbers carry over with the rest and remain unverified; a source must be established before they can be marked verified.",
-    "caching": "cached_input_price_per_1m added for Anthropic, OpenAI, DeepSeek (documented cache-read rates, same unverified mid-2025 vintage). Other providers have no cache offering as modeled and bill cache tokens at the full input rate."
+    "grok": "grok-4 / grok-4.1 / grok-4.1-fast / grok-3 retired in 2026 (redirect to 4.3). Current: 4.1-fast (volume), 4.3 (balanced), 4.6 (flagship).",
+    "caching": "cached_input_price_per_1m added for Anthropic, OpenAI, DeepSeek (documented cache-read rates, same unverified mid-2025 vintage). Other providers have no cache offering as modeled and bill cache tokens at the full input rate.",
+    "deepseek": "Encoded at OFF-PEAK rates. DeepSeek bills peak hours (01:00-04:00 & 06:00-10:00 UTC, Mon-Fri) at ~2x. deepseek-chat/deepseek-reasoner aliases retired 2026-07-24; now deepseek-v4-flash / deepseek-v4-pro. SC4 to model time-of-day.",
+    "qwen": "Encoded at International (Singapore) endpoint rates. Same model differs by region (Beijing/Tokyo/Frankfurt/Virginia). qwen-turbo deprecated -> qwen-flash. SC4 to model region.",
+    "long_context": "Gemini, Anthropic, Grok, and OpenAI flagships apply a higher meter above ~200K tokens (often ~2x). Table encodes STANDARD-context rates. SC4 to model the cliff.",
+    "openai_residency": "OpenAI adds a 10% data-residency uplift on regional endpoints for models released on/after 2026-03-05. Table encodes standard (non-regional) rates. SC4."
   },
   "providers": {
     "anthropic": {
@@ -32,10 +36,10 @@
       "models": {
         "tier_fast": {
           "model_id": "claude-haiku-4-5-20251001",
-          "input_price_per_1m": 0.8,
-          "output_price_per_1m": 4.0,
+          "input_price_per_1m": 1.0,
+          "output_price_per_1m": 5.0,
           "context_window": 200000,
-          "cached_input_price_per_1m": 0.08
+          "cached_input_price_per_1m": 0.1
         },
         "tier_balanced": {
           "model_id": "claude-sonnet-4-6",
@@ -46,10 +50,10 @@
         },
         "tier_powerful": {
           "model_id": "claude-opus-4-6",
-          "input_price_per_1m": 15.0,
-          "output_price_per_1m": 75.0,
+          "input_price_per_1m": 5.0,
+          "output_price_per_1m": 25.0,
           "context_window": 200000,
-          "cached_input_price_per_1m": 1.5
+          "cached_input_price_per_1m": 0.5
         }
       },
       "refresh": {
@@ -79,10 +83,10 @@
         },
         "tier_powerful": {
           "model_id": "o3",
-          "input_price_per_1m": 10.0,
-          "output_price_per_1m": 40.0,
+          "input_price_per_1m": 2.0,
+          "output_price_per_1m": 8.0,
           "context_window": 200000,
-          "cached_input_price_per_1m": 2.5
+          "cached_input_price_per_1m": 0.2
         }
       },
       "refresh": {
@@ -97,22 +101,25 @@
       "protocol": "gemini",
       "models": {
         "tier_fast": {
-          "model_id": "gemini-2.0-flash",
-          "input_price_per_1m": 0.1,
-          "output_price_per_1m": 0.4,
-          "context_window": 1048576
+          "model_id": "gemini-3.5-flash",
+          "input_price_per_1m": 0.3,
+          "output_price_per_1m": 2.5,
+          "context_window": 1048576,
+          "cached_input_price_per_1m": 0.03
         },
         "tier_balanced": {
-          "model_id": "gemini-1.5-pro",
-          "input_price_per_1m": 1.25,
-          "output_price_per_1m": 5.0,
-          "context_window": 2097152
+          "model_id": "gemini-3.1-flash-lite",
+          "input_price_per_1m": 0.25,
+          "output_price_per_1m": 1.5,
+          "context_window": 1048576,
+          "cached_input_price_per_1m": 0.025
         },
         "tier_powerful": {
-          "model_id": "gemini-2.5-pro",
-          "input_price_per_1m": 3.5,
-          "output_price_per_1m": 14.0,
-          "context_window": 1048576
+          "model_id": "gemini-3.1-pro",
+          "input_price_per_1m": 2.0,
+          "output_price_per_1m": 12.0,
+          "context_window": 1048576,
+          "cached_input_price_per_1m": 0.2
         }
       },
       "refresh": {
@@ -130,19 +137,19 @@
           "model_id": "llama-3.1-8b-instant",
           "input_price_per_1m": 0.05,
           "output_price_per_1m": 0.08,
-          "context_window": 128000
+          "context_window": 131072
         },
         "tier_balanced": {
           "model_id": "llama-3.3-70b-versatile",
           "input_price_per_1m": 0.59,
           "output_price_per_1m": 0.79,
-          "context_window": 128000
+          "context_window": 131072
         },
         "tier_powerful": {
           "model_id": "llama-3.3-70b-versatile",
           "input_price_per_1m": 0.59,
           "output_price_per_1m": 0.79,
-          "context_window": 128000
+          "context_window": 131072
         }
       },
       "refresh": {
@@ -158,20 +165,20 @@
       "models": {
         "tier_fast": {
           "model_id": "mistral-small-latest",
-          "input_price_per_1m": 0.1,
-          "output_price_per_1m": 0.3,
+          "input_price_per_1m": 0.15,
+          "output_price_per_1m": 0.6,
           "context_window": 32000
         },
         "tier_balanced": {
-          "model_id": "mistral-medium-latest",
-          "input_price_per_1m": 0.4,
-          "output_price_per_1m": 1.2,
+          "model_id": "mistral-large-latest",
+          "input_price_per_1m": 0.5,
+          "output_price_per_1m": 1.5,
           "context_window": 128000
         },
         "tier_powerful": {
           "model_id": "mistral-large-latest",
-          "input_price_per_1m": 2.0,
-          "output_price_per_1m": 6.0,
+          "input_price_per_1m": 0.5,
+          "output_price_per_1m": 1.5,
           "context_window": 128000
         }
       },
@@ -187,25 +194,25 @@
       "protocol": "openai",
       "models": {
         "tier_fast": {
-          "model_id": "deepseek-chat",
-          "input_price_per_1m": 0.27,
-          "output_price_per_1m": 1.1,
-          "context_window": 64000,
-          "cached_input_price_per_1m": 0.027
+          "model_id": "deepseek-v4-flash",
+          "input_price_per_1m": 0.22,
+          "output_price_per_1m": 0.66,
+          "context_window": 1000000,
+          "cached_input_price_per_1m": 0.007
         },
         "tier_balanced": {
-          "model_id": "deepseek-chat",
-          "input_price_per_1m": 0.27,
-          "output_price_per_1m": 1.1,
-          "context_window": 64000,
-          "cached_input_price_per_1m": 0.027
+          "model_id": "deepseek-v4-flash",
+          "input_price_per_1m": 0.22,
+          "output_price_per_1m": 0.66,
+          "context_window": 1000000,
+          "cached_input_price_per_1m": 0.007
         },
         "tier_powerful": {
-          "model_id": "deepseek-reasoner",
-          "input_price_per_1m": 0.55,
-          "output_price_per_1m": 2.19,
-          "context_window": 64000,
-          "cached_input_price_per_1m": 0.055
+          "model_id": "deepseek-v4-pro",
+          "input_price_per_1m": 0.66,
+          "output_price_per_1m": 1.98,
+          "context_window": 1000000,
+          "cached_input_price_per_1m": 0.022
         }
       },
       "refresh": {
@@ -220,22 +227,23 @@
       "protocol": "openai",
       "models": {
         "tier_fast": {
-          "model_id": "qwen-turbo",
-          "input_price_per_1m": 0.05,
-          "output_price_per_1m": 0.2,
+          "model_id": "qwen-flash",
+          "input_price_per_1m": 0.1,
+          "output_price_per_1m": 0.4,
           "context_window": 1000000
         },
         "tier_balanced": {
           "model_id": "qwen-plus",
           "input_price_per_1m": 0.4,
-          "output_price_per_1m": 1.2,
+          "output_price_per_1m": 2.4,
           "context_window": 131072
         },
         "tier_powerful": {
           "model_id": "qwen-max",
-          "input_price_per_1m": 1.6,
-          "output_price_per_1m": 6.4,
-          "context_window": 32000
+          "input_price_per_1m": 2.0,
+          "output_price_per_1m": 6.0,
+          "context_window": 32000,
+          "cached_input_price_per_1m": 0.25
         }
       },
       "refresh": {
@@ -259,13 +267,15 @@
           "model_id": "grok-4.3",
           "input_price_per_1m": 1.25,
           "output_price_per_1m": 2.5,
-          "context_window": 1000000
+          "context_window": 131072,
+          "cached_input_price_per_1m": 0.2
         },
         "tier_powerful": {
-          "model_id": "grok-4",
-          "input_price_per_1m": 3.0,
-          "output_price_per_1m": 15.0,
-          "context_window": 131072
+          "model_id": "grok-4.6",
+          "input_price_per_1m": 2.0,
+          "output_price_per_1m": 6.0,
+          "context_window": 500000,
+          "cached_input_price_per_1m": 0.5
         }
       },
       "refresh": {

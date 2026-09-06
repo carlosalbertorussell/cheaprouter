@@ -54,11 +54,13 @@ def test_cached_capped_at_input_tokens():
 
 
 def test_cache_supported_flag_reported():
+    # Providers with a verified cache-read rate in the table (SC1, 2026-09-05):
     assert _est("anthropic", "tier_fast", 100, 10, 0).cache_supported is True
     assert _est("openai", "tier_fast", 100, 10, 0).cache_supported is True
     assert _est("deepseek", "tier_fast", 100, 10, 0).cache_supported is True
+    assert _est("gemini", "tier_fast", 100, 10, 0).cache_supported is True   # Gemini cache = 10% input
+    # Providers with no cache offering as modelled — cached tokens bill at full input rate:
     assert _est("groq", "tier_fast", 100, 10, 0).cache_supported is False
-    assert _est("gemini", "tier_fast", 100, 10, 0).cache_supported is False
 
 
 # ─── routing impact ───────────────────────────────────────────────────────────

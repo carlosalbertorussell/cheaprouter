@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **SC1 catalog refresh — the price table is current again (verified 2026-09-05), so the deployed server routes instead of refusing.** Fixed four providers whose model IDs had been retired and would fail at call time: Gemini (2.0-flash/1.5-pro → 3.5-flash/3.1-flash-lite/3.1-pro), DeepSeek (chat/reasoner → v4-flash/v4-pro), Grok (4/4.1-fast → 4.6/4.1-fast), Qwen (turbo → flash). Corrected all stale prices, incl. Anthropic Opus (was the retired $15/$75 → $5/$25) and every Mistral row. Applied the cheapest-current-model-per-tier rule; dropped Mistral Medium as strictly dominated by the now-cheaper Large. DeepSeek encoded at off-peak, Qwen at Singapore endpoint, all at standard context — the peak/region/long-context variance is noted for **SC4**.
+
 ### Added
 - **S5 streaming completions.** `arbitrage_route_completion` gains a `stream` option that consumes the provider's SSE stream (Anthropic + OpenAI-compatible formats, 6 of 8 providers; others fall back to a normal call). Lowers time-to-first-token and reports it as `time_to_first_token_ms`; the full text is still returned as one result. New streaming client layer (`stream_provider`, `stream_supported`). Failover interacts safely: it applies only *before* the first streamed token — a mid-stream error is terminal and never silently retried on another provider (partial output may already be committed).
 
