@@ -108,6 +108,28 @@ DeepSeek/Qwen (except as SC3 model candidates), enterprise gateways
 (Together/Fireworks — Groq covers the lane). OpenRouter is the sole exception,
 as a pricing *source* (SC2), not for coverage.
 
+## Risks (recorded, per external review 2026-09-06)
+
+- **OpenRouter concentration (CR-04) — the load-bearing one.** SC2's currency
+  automation depends on OpenRouter's public price feed, and OpenRouter is
+  simultaneously a **direct competitor** (its native routing competes with the
+  free tier this project's strategy treats as a funnel). The dependency chain is
+  existential: OpenRouter changes / throttles / closes the feed → SC2 breaks →
+  SC8 autonomy breaks → the persistence thesis breaks → the paid attestation
+  product (which rests on that persistence) is undermined. **Mitigations (not yet
+  built):** the SC7 "second-proxy cross-check" should be treated as risk
+  mitigation, not a nice-to-have; identify a concrete second programmatic source
+  (e.g. a Price-Per-Token MCP, or per-provider `json_api` sources) even before
+  implementing it, so the single-source exposure is reduced by design. Note also
+  that Groq/Qwen already stay manual, so the feed is not a *total* single point —
+  but it covers 6 of 8 providers, so its loss is still severe.
+- **Zero external demand.** The whole product/strategy stack (pricing server,
+  attestation, ticker) is validated against *inside-out conviction*, not
+  *outside-in* pull. No customer has asked; the server has no registry presence
+  yet. The disciplined counter is to get it discoverable and let real usage speak
+  (see the registry + no-key-friction items under Beyond-roadmap) rather than
+  build further on unvalidated conviction.
+
 ## Strategic fork — CheapRouter Pricing (SP-series, blueprint stage)
 
 A center-of-gravity option: make **verified price-truth** a product in its own

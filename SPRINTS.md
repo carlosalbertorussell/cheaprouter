@@ -207,6 +207,7 @@ the two forces that fight each other; this sequence resolves them.
   mechanical tending vs. irreducible human judgment) is the *same line* as
   free-tier-vs-certified and automatable-vs-attestation. The agent does the ~95%
   grind (gather/verify/propose); the human does the ~5% that *is* the value
+  (**95/5 is ESTIMATED, not measured — CR-05; measure it once SC8 runs**)
   (vouch, resolve ambiguity, own the methodology) — which is exactly the
   high-leverage senior work, not the drudgery. This is what makes the
   first-mover-via-trust thesis viable for a high-opportunity-cost operator: the
