@@ -232,8 +232,8 @@ as S1, and (per §6) it holds across the waist too.
 
 ## 10. Suggested build sequence (once approved)
 
-- **SP1a** — formalise the waist: extract `provenance.py` (the three tiers) and
-  make `pricing_table.py` tier-aware, no behaviour change to the router.
+- **SP1a** — ✅ SHIPPED 2026-09-05. `provenance.py` (three tiers) + tier-aware
+  `pricing_table.py`; no router behaviour change, 12 tests.
 - **SP1b** — `price_history.py` + history capture on verified changes. Pluggable store; **versioned append-only file backend first** (git = audit log), Postgres as the documented upgrade path. NOT Redis (see §7).
 - **SP1c** — `pricing_server.py` entrypoint + the read tools (get/list/drift/
   history).

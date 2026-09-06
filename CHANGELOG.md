@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **SP1a — provenance model (shared spine).** New `provenance.py` formalises the three trust tiers — `verified` (human-checked, citable), `proxy` (third-party feed, e.g. OpenRouter), `observed` (empirical, from real routing) — as a hierarchy that never auto-promotes (`can_promote` is always False; verification is a human act). `pricing_table.py` is now tier-aware: `table_provenance()` reports the committed table as `verified`, and the `price_table` block in every tool response carries a `tier` field. First step of the CheapRouter Pricing server (PRICING_SERVER_BLUEPRINT.md). **No behaviour change to the router** — additive only; 150 tests pass.
+
+### Added
 - **SC2 programmatic price source (OpenRouter feed).** `arbitrage_check_price_drift` and `refresh.py` now drift-check 6 providers (Anthropic, OpenAI, Gemini, Mistral, DeepSeek, Grok) against OpenRouter's public `/api/v1/models` feed — the automated source S4b's machinery was built for. One shared fetch indexes all models; OpenRouter's per-token prices are converted to per-1M and compared incl. cache-read rates. Groq and Qwen stay manual (documented: Groq's price is host-specific, not the open model OpenRouter prices; Qwen's current OpenRouter IDs are unstable). Missing IDs and feed outages degrade to `fetch_failed`, never bad data. Turns currency from a 45-day manual chore into an automated check for most of the catalog.
 
 ### Changed
