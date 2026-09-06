@@ -149,7 +149,7 @@ market for whoever comes next.
 
 **SC8 (the autonomous verification agent) is what dissolves this.** Tending splits
 into two halves along the *same line* as free-vs-certified:
-- **Automatable (~95%):** drift detection (SC2), scheduled verification against
+- **Automatable (~95% — ESTIMATED, UNMEASURED):** drift detection (SC2), scheduled verification against
   public provider pages, history capture, PR-proposed updates, published snapshots.
   Runs autonomously in GitHub Actions. This is the grind — and it's gone.
 - **Irreducibly human (~5%):** *standing behind* the number (attestation is a
@@ -157,6 +157,8 @@ into two halves along the *same line* as free-vs-certified:
   conflicts, model retirements, structural repricing), and owning the methodology.
   This is the *value*, and it's exactly the high-leverage senior work — low-volume,
   high-worth, the part your credibility makes valuable.
+
+**The 95/5 split is an estimate, not a measurement** (per external review CR-05). It is the load-bearing answer to the persistence objection, so it should be *measured* once SC8 runs — track what fraction of drift findings auto-verify vs. escalate — and restated with real numbers. Until then it is a reasoned guess, held to the same standard as any unverified claim in this project.
 
 So the persistence question isn't "will I grind on data for years?" (SC8 answers
 no) but "will I stay the light-touch overseer who vouches and judges?" — a
@@ -200,15 +202,35 @@ tiers can be looser; the `verified` tier that backs certification cannot.)
   a first-class field, and `price_history` (SP1b) as the dataset spine.
 - So the tiered decision *sharpens* SP1: build the provenance/attestation model to
   certification depth from the start (SP1a), because the paid product is that
-  model — not a feature added later.
+  model — not a feature added later. **BUT (CR-03):** "to certification depth"
+  cannot be built correctly without first answering **what "certified" warrants**
+  — the liability posture is a *design input* to the attestation/confidence model,
+  not a later business decision. The KPI framing's own words ("raises the liability
+  bar to a financial-decision standard… a legal requirement, not just a moat") are
+  the argument to pull it forward. So: the *read-only* pricing server (SP1a–SP1e as
+  built — verified/proxy/observed tiers, history, drift) is safe to build now, but
+  **anything that stamps a snapshot as "certified" or attaches an attestation/
+  confidence claim is gated on the liability decision below.** Don't ship the word
+  "certified" before deciding what it promises.
+
+## Gating decision — liability (CR-03, was deferred, now build-gating)
+
+**What does "certified" actually warrant — what is warranted, with what limit,
+to whom?** This was previously filed as "later, not build-blocking," which
+contradicted the decision to build to certification depth from the start. It is a
+*design input* to the attestation model: the confidence field, the signing choice,
+and what a certified snapshot claims all depend on it. Carlos's governance/risk
+lens is exactly the right lens. **Gate:** the read-only pricing server may proceed;
+the *certified/attestation* layer (and any use of the word "certified" in a
+product surface) waits on this. Not urgent to *build* — urgent to *decide before*
+building the attestation layer.
 
 ## Open strategic questions (for Carlos, later — not build-blocking)
 
 1. **Signing:** does a certified snapshot need cryptographic signing (a real
    signature/hash chain) to be citable, or is a dated provenance trail enough?
-2. **Liability posture:** what does "certified" actually warrant? (This is a legal
-   question as much as a product one — Carlos's governance lens applies.)
-3. **Attestation scope:** verify only the 8 curated providers, or offer to certify
+   (Note: partly downstream of the liability gate above.)
+2. **Attestation scope:** verify only the 8 curated providers, or offer to certify
    arbitrary third-party pricing claims (the bigger, harder attestation business)?
-4. **Pricing of the paid tier:** per-snapshot, subscription, per-seat, per-query?
+3. **Pricing of the paid tier:** per-snapshot, subscription, per-seat, per-query?
    (Deliberately unanswered — this is the part that changes ten times.)
