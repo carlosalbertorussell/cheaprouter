@@ -139,6 +139,36 @@ changes:
   prices. Comprehensiveness serves *citability*; a rigorous series beats a
   sloppy-but-broad one — coverage grows only as fast as currency can keep it honest.
 
+## Autonomous tending — resolving the persistence objection (SC8)
+
+The strongest objection to the first-mover-via-trust thesis: trust compounds over
+*years*, and only if the reference is tended *quarter after quarter* — a
+maintenance-forever burden that collides with a high-opportunity-cost operator's
+time. Unsustained first-mover advantage is just an expensive way to educate the
+market for whoever comes next.
+
+**SC8 (the autonomous verification agent) is what dissolves this.** Tending splits
+into two halves along the *same line* as free-vs-certified:
+- **Automatable (~95%):** drift detection (SC2), scheduled verification against
+  public provider pages, history capture, PR-proposed updates, published snapshots.
+  Runs autonomously in GitHub Actions. This is the grind — and it's gone.
+- **Irreducibly human (~5%):** *standing behind* the number (attestation is a
+  human liability act, not a technical one), resolving genuine ambiguity (source
+  conflicts, model retirements, structural repricing), and owning the methodology.
+  This is the *value*, and it's exactly the high-leverage senior work — low-volume,
+  high-worth, the part your credibility makes valuable.
+
+So the persistence question isn't "will I grind on data for years?" (SC8 answers
+no) but "will I stay the light-touch overseer who vouches and judges?" — a
+sustainable role, not a second job. **The automation boundary IS the monetization
+boundary IS the attestation boundary.** That the same line keeps appearing is how
+we know the design is coherent: the free tier is what the agent can tend alone;
+the certified tier is what only a human can vouch for.
+
+Honest limit: autonomous ≠ unattended. The agent misreads pages sometimes;
+escalations need a human; methodology is an ongoing (light) responsibility. SC8
+converts a daily data-ops job into oversight — not into zero work.
+
 ## The discipline this requires (non-negotiable)
 
 Every monetization option above adds a **promise**, and promises about data have

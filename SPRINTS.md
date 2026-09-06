@@ -150,6 +150,76 @@ the two forces that fight each other; this sequence resolves them.
   disagreeing proxies are more informative than one (cf. the o3 $2/$8-vs-$10/$40
   conflict that correctly triggered manual verification). Depends on SC2.
 
+- **SC8 — Autonomous verification agent.** The piece that makes tending the price
+  data *autonomous* — turning "will I keep this current for years?" from a grind
+  into a background process with the human as light-touch overseer. It is the
+  automatable version of the manual verification pass run on 2026-09-05 (search
+  provider pages, cross-check, flag conflicts, propose updates), turned into a
+  scheduled agent.
+
+  **Where it sits (settled): GitHub Actions, NOT inside the MCP servers.** The
+  router/pricing servers are stateless request-response processes that hold
+  nothing and do one thing; an always-on agent embedded in them would break that
+  model and need write-back credentials. The agent is a *separate* scheduled
+  process — the servers *serve* the data, the agent *tends* it. GitHub Actions is
+  the right home because: (a) it's already where SC7's schedule lives; (b) its
+  output is "open a PR," landing changes exactly where human approval already sits
+  (the merge) — no new trust surface; (c) **git is the audit log** — every
+  proposed change is a commit + diff + timestamp + cited source in the PR body,
+  the immutable provenance trail the certified thesis needs, for free; (d) it
+  reads *public* pricing pages, so it needs **no provider keys** — zero
+  secret-handling risk; (e) zero infrastructure/uptime/bill. Scheduled (daily),
+  not real-time — correct, because prices move weekly (SC7).
+
+  **What it does (autonomous half):** on a daily cron — run the SC2 drift check
+  (OpenRouter feed), fetch the relevant provider pricing pages, verify each
+  flagged change against the page, append confirmed movements to `price_history`,
+  and **open a PR** proposing the update with the source cited. `scripts/
+  verify_agent.py` reuses `refresh.py`'s drift machinery + page reads;
+  `.github/workflows/verify-prices.yml` schedules it.
+
+  **The auto-verify-vs-escalate rule (the crux):** the agent classifies each
+  finding.
+    - **auto-verify** — the OpenRouter feed and the provider page *agree* on a
+      changed number → PR labelled `price-update:auto-verified`, cited, a quick
+      human merge.
+    - **escalate** — sources *conflict* (o3 case), a model ID is *retired* (needs
+      a replacement judgment), or a provider does something *structurally new*
+      (DeepSeek-style peak/off-peak → methodology work) → PR labelled
+      `price-update:needs-judgment`, describing the ambiguity, NOT a number to
+      rubber-stamp. Optionally a human invokes an on-demand agent session
+      (Cowork/Claude Code) to reason through it — the smart part, human-triggered.
+
+  **Hard safeguards (keep "no invented prices" intact even with an agent in the
+  loop):**
+    1. The agent **proposes via PR, never writes verified prices directly.** The
+       `verified` tier only advances on a **human merge** — the agent can propose
+       all day but can never *certify*.
+    2. A stale-but-safe number beats an auto-scraped wrong one — on any doubt
+       (page format changed, extraction uncertain, sources disagree) it
+       **escalates, never guesses**.
+    3. No provider keys, no paid calls — reads public pages only.
+    4. It runs on the `verified`/`proxy` provenance tiers only; it never touches
+       the `observed` tier or any content/keys (nothing to touch — it's a
+       separate process from routing).
+
+  **Why this matters strategically:** the automation boundary (autonomous
+  mechanical tending vs. irreducible human judgment) is the *same line* as
+  free-tier-vs-certified and automatable-vs-attestation. The agent does the ~95%
+  grind (gather/verify/propose); the human does the ~5% that *is* the value
+  (vouch, resolve ambiguity, own the methodology) — which is exactly the
+  high-leverage senior work, not the drudgery. This is what makes the
+  first-mover-via-trust thesis viable for a high-opportunity-cost operator: the
+  reference tends itself and calls a human only for judgment. Depends on SC2
+  (drift machinery) and pairs with SC7 (the schedule it runs on); SP1b's
+  `price_history` is where confirmed movements accrue. Needs `workflow` scope to
+  land the Action.
+
+  **Honest limit:** autonomous ≠ unattended. The agent will sometimes misread a
+  page; escalations still need a human; and "who owns the methodology" is a real
+  (if light) ongoing responsibility. It converts a daily data-ops job into a
+  light-touch oversight role — not into zero work.
+
 **Note — no single source of pricing truth exists, by design of the market.**
 Pricing ground-truth is federated: it lives on 8 provider pages, in 8 formats,
 changing on 8 schedules. There is no consolidated tape for LLM tokens. OpenRouter
