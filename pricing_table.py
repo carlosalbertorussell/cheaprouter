@@ -115,7 +115,18 @@ def price_table_status(today: Optional[date] = None) -> dict:
         "max_age_days": MAX_AGE_DAYS,
         "stale": is_stale(today),
         "allow_stale_override": _allow_stale(),
+        "tier": "verified",          # the committed table is the VERIFIED tier (SP1a)
     }
+
+
+def table_provenance():
+    """
+    Provenance of the whole committed table (SP1a). The committed prices.json is the
+    VERIFIED tier by construction — a human ran the verification and stamped
+    verified_at/verified_by. Returns a provenance.Provenance.
+    """
+    from provenance import table_provenance as _tp
+    return _tp(_TABLE)
 
 
 def pricing_urls() -> dict:

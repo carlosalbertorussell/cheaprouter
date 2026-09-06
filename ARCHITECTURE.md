@@ -12,7 +12,8 @@ server.py     — FastMCP server; defines the 5 tools and their input schemas
 router.py     — routing decision engine (price → availability → latency → region)
 pricing.py    — cost calculation and comparison-table rendering
 providers.py  — provider registry, built from the price table; regions, key resolution
-pricing_table.py — loads/validates prices.json; staleness guard (S4a)
+pricing_table.py — loads/validates prices.json; staleness guard (S4a); tier-aware (SP1a)
+provenance.py — the three trust tiers: verified / proxy / observed (SP1a; pricing-server spine)
 refresh.py    — drift check vs fetchable sources; OpenRouter feed for 6 providers (S4b/SC2)
 prices.json   — versioned price table with provenance (verified_at, max_age_days)
 client.py     — async HTTP client; three wire protocols; transient-error classifier (S2); SSE streaming layer (S5)
