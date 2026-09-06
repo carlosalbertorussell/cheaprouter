@@ -234,7 +234,7 @@ as S1, and (per §6) it holds across the waist too.
 
 - **SP1a** — ✅ SHIPPED 2026-09-05. `provenance.py` (three tiers) + tier-aware
   `pricing_table.py`; no router behaviour change, 12 tests.
-- **SP1b** — `price_history.py` + history capture on verified changes. Pluggable store; **versioned append-only file backend first** (git = audit log), Postgres as the documented upgrade path. NOT Redis (see §7).
+- **SP1b** — ✅ SHIPPED 2026-09-05. `price_history.py`: append-only, pluggable, versioned-file backend (git = audit log); record_diff/trajectory/summary; metadata-only. 12 tests. Capture wiring into the verify flow is SP1d/SC8.
 - **SP1c** — `pricing_server.py` entrypoint + the read tools (get/list/drift/
   history).
 - **SP1d** — the waist interaction: router publishes observed/availability

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **SP1b — price history (the trajectory record).** New `price_history.py`: an append-only, provenance-tagged record of price *changes* over time — the citable series that turns a snapshot into a KPI (a KPI's value is its trajectory). Pluggable backend; **versioned-file default** (`price_history.jsonl`, un-ignored so git is its immutable audit log), Postgres as the documented upgrade path, never Redis. `record_diff()` bridges a table update to history entries; `trajectory()` returns the series behind a symbol; `summary()` aggregates. Metadata only — no keys, no content (verified by test). Standalone in SP1b; capture wires into the verify flow at SP1d/SC8. No router change; 162 tests pass.
+
+### Added
 - **SP1a — provenance model (shared spine).** New `provenance.py` formalises the three trust tiers — `verified` (human-checked, citable), `proxy` (third-party feed, e.g. OpenRouter), `observed` (empirical, from real routing) — as a hierarchy that never auto-promotes (`can_promote` is always False; verification is a human act). `pricing_table.py` is now tier-aware: `table_provenance()` reports the committed table as `verified`, and the `price_table` block in every tool response carries a `tier` field. First step of the CheapRouter Pricing server (PRICING_SERVER_BLUEPRINT.md). **No behaviour change to the router** — additive only; 150 tests pass.
 
 ### Added

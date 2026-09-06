@@ -1,5 +1,7 @@
 .env
 *.jsonl
+# ...except the versioned price-history series — git IS its audit log (SP1b)
+!price_history.jsonl
 __pycache__/
 *.pyc
 *.pyo
