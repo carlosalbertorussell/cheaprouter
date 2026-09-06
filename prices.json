@@ -16,7 +16,8 @@
     "grok": null
   },
   "notes": {
-    "grok": "No official pricing URL was ever recorded in the README for xAI Grok. Its numbers carry over with the rest and remain unverified; a source must be established before they can be marked verified."
+    "grok": "No official pricing URL was ever recorded in the README for xAI Grok. Its numbers carry over with the rest and remain unverified; a source must be established before they can be marked verified.",
+    "caching": "cached_input_price_per_1m added for Anthropic, OpenAI, DeepSeek (documented cache-read rates, same unverified mid-2025 vintage). Other providers have no cache offering as modeled and bill cache tokens at the full input rate."
   },
   "providers": {
     "anthropic": {
@@ -33,19 +34,22 @@
           "model_id": "claude-haiku-4-5-20251001",
           "input_price_per_1m": 0.8,
           "output_price_per_1m": 4.0,
-          "context_window": 200000
+          "context_window": 200000,
+          "cached_input_price_per_1m": 0.08
         },
         "tier_balanced": {
           "model_id": "claude-sonnet-4-6",
           "input_price_per_1m": 3.0,
           "output_price_per_1m": 15.0,
-          "context_window": 200000
+          "context_window": 200000,
+          "cached_input_price_per_1m": 0.3
         },
         "tier_powerful": {
           "model_id": "claude-opus-4-6",
           "input_price_per_1m": 15.0,
           "output_price_per_1m": 75.0,
-          "context_window": 200000
+          "context_window": 200000,
+          "cached_input_price_per_1m": 1.5
         }
       },
       "refresh": {
@@ -63,19 +67,22 @@
           "model_id": "gpt-4o-mini",
           "input_price_per_1m": 0.15,
           "output_price_per_1m": 0.6,
-          "context_window": 128000
+          "context_window": 128000,
+          "cached_input_price_per_1m": 0.075
         },
         "tier_balanced": {
           "model_id": "gpt-4o",
           "input_price_per_1m": 2.5,
           "output_price_per_1m": 10.0,
-          "context_window": 128000
+          "context_window": 128000,
+          "cached_input_price_per_1m": 1.25
         },
         "tier_powerful": {
           "model_id": "o3",
           "input_price_per_1m": 10.0,
           "output_price_per_1m": 40.0,
-          "context_window": 200000
+          "context_window": 200000,
+          "cached_input_price_per_1m": 2.5
         }
       },
       "refresh": {
@@ -183,19 +190,22 @@
           "model_id": "deepseek-chat",
           "input_price_per_1m": 0.27,
           "output_price_per_1m": 1.1,
-          "context_window": 64000
+          "context_window": 64000,
+          "cached_input_price_per_1m": 0.027
         },
         "tier_balanced": {
           "model_id": "deepseek-chat",
           "input_price_per_1m": 0.27,
           "output_price_per_1m": 1.1,
-          "context_window": 64000
+          "context_window": 64000,
+          "cached_input_price_per_1m": 0.027
         },
         "tier_powerful": {
           "model_id": "deepseek-reasoner",
           "input_price_per_1m": 0.55,
           "output_price_per_1m": 2.19,
-          "context_window": 64000
+          "context_window": 64000,
+          "cached_input_price_per_1m": 0.055
         }
       },
       "refresh": {

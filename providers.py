@@ -40,6 +40,7 @@ class ModelConfig:
     output_price_per_1m: float
     context_window: int
     supports_system_prompt: bool = True
+    cached_input_price_per_1m: Optional[float] = None  # cache-hit input price (S3); None = provider has no cache discount
 
 
 @dataclass
@@ -105,6 +106,10 @@ def _build_providers() -> dict[str, ProviderConfig]:
                 input_price_per_1m=float(m["input_price_per_1m"]),
                 output_price_per_1m=float(m["output_price_per_1m"]),
                 context_window=int(m["context_window"]),
+                cached_input_price_per_1m=(
+                    float(m["cached_input_price_per_1m"])
+                    if m.get("cached_input_price_per_1m") is not None else None
+                ),
             )
             for tier, m in p["models"].items()
         }

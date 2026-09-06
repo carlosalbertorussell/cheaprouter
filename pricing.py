@@ -23,6 +23,8 @@ class CostEstimate:
     total_cost_usd: float
     latency_ms: int
     is_configured: bool
+    cached_input_tokens: int = 0          # of input_tokens, how many were cache hits (S3)
+    cache_supported: bool = False         # does this model have a cache-hit price?
 
     @classmethod
     def compute(
@@ -34,8 +36,20 @@ class CostEstimate:
         input_tokens: int,
         output_tokens: int,
         user_keys: dict[str, str],
+        cached_input_tokens: int = 0,
     ) -> "CostEstimate":
-        input_cost = (input_tokens / 1_000_000) * model.input_price_per_1m
+        # Split input into fresh vs cached. Cached tokens are billed at the model's
+        # cache-hit price when it has one; otherwise they fall back to the full input
+        # price (a provider with no cache discount is never wrongly advantaged). (S3)
+        cached = max(0, min(cached_input_tokens, input_tokens))
+        fresh = input_tokens - cached
+        cache_supported = model.cached_input_price_per_1m is not None
+        cache_rate = model.cached_input_price_per_1m if cache_supported else model.input_price_per_1m
+
+        input_cost = (
+            (fresh / 1_000_000) * model.input_price_per_1m
+            + (cached / 1_000_000) * cache_rate
+        )
         output_cost = (output_tokens / 1_000_000) * model.output_price_per_1m
         return cls(
             provider_id=provider_id,
@@ -50,6 +64,8 @@ class CostEstimate:
             total_cost_usd=round(input_cost + output_cost, 8),
             latency_ms=provider.latency_ms,
             is_configured=bool(resolve_api_key(provider_id, user_keys)),
+            cached_input_tokens=cached,
+            cache_supported=cache_supported,
         )
 
     def to_dict(self) -> dict:
@@ -66,6 +82,8 @@ class CostEstimate:
             "total_cost_usd": self.total_cost_usd,
             "latency_ms": self.latency_ms,
             "is_configured": self.is_configured,
+            "cached_input_tokens": self.cached_input_tokens,
+            "cache_supported": self.cache_supported,
         }
 
 
@@ -75,6 +93,7 @@ def estimate_all_providers(
     input_tokens: int,
     output_tokens: int,
     user_keys: dict[str, str] = None,
+    cached_input_tokens: int = 0,
 ) -> list[CostEstimate]:
     """Compute cost estimates for all providers at a given tier, sorted cheapest first."""
     if user_keys is None:
@@ -96,6 +115,7 @@ def estimate_all_providers(
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 user_keys=user_keys,
+                cached_input_tokens=cached_input_tokens,
             )
         )
 
