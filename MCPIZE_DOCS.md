@@ -59,9 +59,9 @@ to semantically equivalent models across all providers:
 
 | Tier | Best for | Example models |
 |------|----------|----------------|
-| `tier_fast` | Simple tasks, high volume, cost-sensitive | Haiku 4.5, GPT-4o mini, Gemini 3.5 Flash, Llama 3.1 8B, Qwen Flash, DeepSeek V4 Flash, Grok 4.1 Fast |
+| `tier_fast` | Simple tasks, high volume, cost-sensitive | Haiku 4.5, GPT-4o mini, Gemini 3.1 Flash-Lite, Llama 3.1 8B, Qwen Flash, DeepSeek V4 Flash, Grok 4.3 |
 | `tier_balanced` | Most everyday tasks | Sonnet 4.6, GPT-4o, Gemini 3.1 Flash-Lite, Llama 3.3 70B, Qwen Plus, DeepSeek V4 Flash, Grok 4.3 |
-| `tier_powerful` | Complex reasoning, long context | Opus 4.6, o3, Gemini 3.1 Pro, Mistral Large 3, DeepSeek V4 Pro, Qwen Max, Grok 4.6 |
+| `tier_powerful` | Complex reasoning, long context | Opus 4.6, o3, Gemini 3.1 Pro (preview), Mistral Large 3, DeepSeek V4 Pro, Qwen Max, Grok 4.6 |
 
 ---
 
