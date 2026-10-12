@@ -65,6 +65,26 @@ the two forces that fight each other; this sequence resolves them.
   keeps it current automatically. Depends on SC2. Deliberately NOT about adding
   new providers — that's separate and mostly stays deferred (see below). **KPI-coverage driver (2026-09, see PRICING_STRATEGY.md):** if the pricing data is positioned as financial-KPI intelligence, SC3's target list explicitly adds the financially-material players — major labs' full lineups and the cloud gateways (Azure OpenAI / AWS Bedrock / Google Vertex, in scope here as KPI-coverage targets even though deferred as routing targets) — because a KPI series that omits them is incomplete as market intelligence. Rationale shifts from 'more arbitrage' to 'citable coverage'; timing unchanged (still behind SC2).
 
+- **SC1c — Catalog-wide "cheapest current" pass (deferred from SC1b, 2026-10-12).**
+  SC1b only fixed the broken rows. Cheaper current models exist that the table
+  does not use: Anthropic Sonnet 5.5 ($2/$10/$0.10 vs Sonnet 4.6 $3/$15/$0.30),
+  Haiku 5.5, Opus 5.5 ($4/$20/$0.20); Gemini 3.6 / 3.8 Flash; xAI grok-4.7; Mistral
+  Large 4 (public preview, `mistral-large-4`). Gemini and Grok tier_fast now
+  duplicate tier_balanced by decision — a distinct fast model for each is part of
+  this pass. Each model swap is Carlos's call.
+- **OpenAI migration (urgent-ish, deferred from SC1b).** gpt-4o-mini, gpt-4o and o3
+  were kept and priced from their model pages, but OpenAI dropped them from its
+  pricing table, marks o3 Deprecated (succeeded by GPT-5), and shuts down snapshots
+  gpt-4o-2024-05-13 on 2026-10-23 and o3-2025-04-16 on 2026-12-11. Candidates:
+  GPT-5.6 Sol / Terra / Luna (prices not yet read). Decide before December.
+- **Catalog hygiene found in SC1b (small, no decision of substance):** pin Mistral
+  to dated ids (`mistral-small-2603`, `mistral-large-2512`) — no Mistral page says
+  what the `-latest` aliases resolve to; model cache pricing for Mistral (Small 4
+  $0.015, Large 3 $0.05) and qwen-flash/qwen-plus (implicit cache 20% of input),
+  today billed at full input; refresh `context_window` values that drifted
+  (grok-4.3 page says 1M vs 131072; Mistral Small 4 and Large 3 say 256k vs
+  32000/128000).
+
 - **SC4 — Variable / jurisdictional pricing schema.** The one-price-per-model
   schema flattens away real, structured price variation that the arbitrage engine
   should be *using*, not ignoring. Three axes found during the SC1 verification
@@ -299,6 +319,7 @@ The through-line: a provider joins the core only if it's **token-priced and adds
 
 ## Closed
 
+- **SC1b — Price refresh before expiry** (2026-10-12) — table was due to expire 2026-10-20 with five rows on models no longer on their provider's pricing page. Applied Carlos's decisions: gemini tier_fast `gemini-3.5-flash` (never existed; its prices were 3.5 Flash-Lite's) → `gemini-3.1-flash-lite`; grok tier_fast `grok-4.1-fast` → `grok-4.3`; OpenAI gpt-4o-mini / gpt-4o / o3 kept and priced from their model pages. Ambiguities resolved: gemini powerful id → `gemini-3.1-pro-preview`; qwen-plus output at non-thinking rate (2.4 → 1.2); Mistral Small direction read from the labelled pricing table. Re-read all 21 rows against provider pages; real finds: o3 cache-read 0.20 → 0.50, qwen-max cache 0.25 → 0.32 (provider's 20%-of-input rule). verified_at=2026-10-12, guard good to 2026-11-26. Docs (README, MCPIZE_DOCS tiers, MCPIZE_LISTING table — the latter also stale since PR #47) brought in line. No test asserted these ids/prices; 183 pass. Deferred to backlog: catalog-wide pass (SC1c), OpenAI migration, catalog hygiene.
 - **SC2 — Programmatic price source (OpenRouter feed)** (2026-09-05) — refresh.py drift-checks 6 providers (Anthropic/OpenAI/Gemini/Mistral/DeepSeek/Grok) against OpenRouter's public /api/v1/models feed; one shared fetch, per-token->per-1M conversion, cache-read compared. Groq+Qwen stay manual (documented). Missing IDs / feed outage -> fetch_failed, never bad data. Currency now automated for most of the catalog instead of a 45-day manual chore. 8 tests (mocked feed; sandbox blocks openrouter.ai, runs live on MCPize).
 - **SC1 — Catalog refresh** (2026-09-05) — verified all 8 providers against current pricing; the table is current again so the deployed server routes instead of refusing. Replaced 4 providers' retired model IDs (Gemini, DeepSeek, Grok, Qwen) that would fail at call time; corrected all stale prices (Anthropic Opus $15/$75→$5/$25, all Mistral, o3 $10/$40→$2/$8). Cheapest-current-per-tier rule; Mistral Medium dropped (Large now cheaper). DeepSeek off-peak, Qwen Singapore, standard context — variance noted for SC4. verified_at=2026-09-05, guard now fresh. 6 stale-premise tests updated (shipped table is now fresh, not stale); Gemini gained verified cache pricing. 130 tests pass.
 - **S5 — Streaming completions** (2026-09-05) — route_completion 'stream' option consumes the provider SSE stream (anthropic + openai formats; gemini falls back). Streaming client layer (stream_provider/stream_supported). Reports time_to_first_token_ms. Failover is pre-first-token only — a mid-stream error is terminal (tagged _cheaprouter_stream_started), never retried, since partial output may be committed. MCP returns one final result; this is server-side streaming from the provider, not an MCP-level token stream. 7 tests.

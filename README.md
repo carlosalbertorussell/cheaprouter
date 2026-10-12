@@ -18,12 +18,12 @@ credentials and stores no content.
 |----------|--------|-----------|---------------|---------------|
 | Anthropic | US | claude-haiku-4-5 | claude-sonnet-4-6 | claude-opus-4-6 |
 | OpenAI | US | gpt-4o-mini | gpt-4o | o3 |
-| Google Gemini | US | gemini-3.5-flash | gemini-3.1-flash-lite | gemini-3.1-pro |
+| Google Gemini | US | gemini-3.1-flash-lite | gemini-3.1-flash-lite | gemini-3.1-pro-preview |
 | Groq | US | llama-3.1-8b-instant | llama-3.3-70b-versatile | llama-3.3-70b-versatile |
 | Mistral AI | EU | mistral-small-latest | mistral-large-latest | mistral-large-latest |
 | DeepSeek | CN | deepseek-v4-flash | deepseek-v4-flash | deepseek-v4-pro |
 | Alibaba Qwen | CN | qwen-flash | qwen-plus | qwen-max |
-| xAI Grok | US | grok-4.1-fast | grok-4.3 | grok-4.6 |
+| xAI Grok | US | grok-4.3 | grok-4.3 | grok-4.6 |
 
 > **Note on CN providers (DeepSeek, Qwen):** Latency from Buenos Aires is ~390ms.
 > Pass `latency_sensitive: true` to route_completion to exclude them automatically

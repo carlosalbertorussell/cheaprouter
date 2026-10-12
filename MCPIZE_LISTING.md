@@ -5,7 +5,7 @@ repo is the source of truth; this file is the paste-ready extract for the parts
 that are edited in the MCPize dashboard (which can't be updated from the repo or
 by an agent — they need your MCPize login).
 
-_Generated from `prices.json` (verified 2026-09-05) and `mcpize.yaml` (v1.1.0)._
+_Generated from `prices.json` (verified 2026-10-12) and `mcpize.yaml` (v1.1.0)._
 
 ---
 
@@ -20,7 +20,7 @@ mcpize deploy          # from the repo, or trigger from the MCPize dashboard
 ```
 
 After redeploy, verify: `arbitrage_provider_status` should list **8** providers,
-and `arbitrage_get_pricing` should show the current models (e.g. gemini-3.5-flash,
+and `arbitrage_get_pricing` should show the current models (e.g. gemini-3.1-flash-lite,
 deepseek-v4-flash — not the old retired IDs).
 
 ## 2. Listing description (paste into the MCPize dashboard)
@@ -58,7 +58,7 @@ deepseek-v4-flash — not the old retired IDs).
 
 ## 3. Current verified pricing (for the listing / a pricing tab)
 
-Prices are USD per 1M tokens, verified 2026-09-05. Cache = cache-read rate where
+Prices are USD per 1M tokens, verified 2026-10-12. Cache = cache-read rate where
 the provider offers it.
 
 | Provider | Tier | Model | Input | Output | Cache |
@@ -68,25 +68,23 @@ the provider offers it.
 | Anthropic | powerful | claude-opus-4-6 | 5.00 | 25.00 | 0.50 |
 | OpenAI | fast | gpt-4o-mini | 0.15 | 0.60 | 0.075 |
 | OpenAI | balanced | gpt-4o | 2.50 | 10.00 | 1.25 |
-| OpenAI | powerful | o3 | 2.00 | 8.00 | 0.20 |
-| Gemini | fast | gemini-3.5-flash | 0.30 | 2.50 | 0.03 |
-| Gemini | balanced | gemini-3.1-flash-lite | 0.25 | 1.50 | 0.025 |
-| Gemini | powerful | gemini-3.1-pro | 2.00 | 12.00 | 0.20 |
+| OpenAI | powerful | o3 | 2.00 | 8.00 | 0.50 |
+| Gemini | fast/balanced | gemini-3.1-flash-lite | 0.25 | 1.50 | 0.025 |
+| Gemini | powerful | gemini-3.1-pro-preview | 2.00 | 12.00 | 0.20 |
 | Groq | fast | llama-3.1-8b-instant | 0.05 | 0.08 | — |
 | Groq | balanced/powerful | llama-3.3-70b-versatile | 0.59 | 0.79 | — |
 | Mistral | fast | mistral-small-latest | 0.15 | 0.60 | — |
 | Mistral | balanced/powerful | mistral-large-latest | 0.50 | 1.50 | — |
-| DeepSeek | fast/balanced | deepseek-v4-flash (off-peak) | 0.22 | 0.66 | 0.007 |
+| DeepSeek | fast/balanced | deepseek-v4-flash (off-peak) | 0.15 | 0.60 | 0.003 |
 | DeepSeek | powerful | deepseek-v4-pro (off-peak) | 0.66 | 1.98 | 0.022 |
-| Qwen | fast | qwen-flash | 0.10 | 0.40 | — |
-| Qwen | balanced | qwen-plus | 0.40 | 2.40 | — |
-| Qwen | powerful | qwen-max | 2.00 | 6.00 | 0.25 |
-| Grok | fast | grok-4.1-fast | 0.20 | 0.50 | — |
-| Grok | balanced | grok-4.3 | 1.25 | 2.50 | 0.20 |
+| Qwen | fast | qwen-flash | 0.05 | 0.40 | — |
+| Qwen | balanced | qwen-plus | 0.40 | 1.20 | — |
+| Qwen | powerful | qwen-max | 1.60 | 6.40 | 0.32 |
+| Grok | fast/balanced | grok-4.3 | 1.25 | 2.50 | 0.20 |
 | Grok | powerful | grok-4.6 | 2.00 | 6.00 | 0.50 |
 
-Notes: DeepSeek encoded at off-peak (peak ~2x); Qwen at the Singapore endpoint;
-all at standard context. See `prices.json` notes for the variance. These are the
+Notes: DeepSeek encoded at off-peak (peak ~2x); Qwen at the Singapore endpoint,
+qwen-plus at the non-thinking rate; all at standard context. See `prices.json` notes for the variance. These are the
 provider *list* prices cheaprouter routes on — your negotiated rates may differ.
 
 ## 4. What an agent can't do here (why this is a checklist, not an automated update)
