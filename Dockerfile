@@ -9,6 +9,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY *.py ./
 
+# The price table is required at import time (pricing_table refuses to start
+# without it). Copied explicitly — the COPY above only matches *.py.
+COPY prices.json ./
+
 # MCPize injects PORT; default to 8081 for local runs
 ENV PORT=8081
 EXPOSE 8081
