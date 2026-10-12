@@ -21,7 +21,8 @@
     "deepseek": "Encoded at OFF-PEAK rates. DeepSeek bills peak hours (01:00-04:00 & 06:00-10:00 UTC, Mon-Fri) at ~2x. deepseek-chat/deepseek-reasoner aliases retired 2026-07-24; now deepseek-v4-flash / deepseek-v4-pro. SC4 to model time-of-day.",
     "qwen": "Encoded at International (Singapore) endpoint rates. Same model differs by region (Beijing/Tokyo/Frankfurt/Virginia). qwen-turbo deprecated -> qwen-flash. SC4 to model region.",
     "long_context": "Gemini, Anthropic, Grok, and OpenAI flagships apply a higher meter above ~200K tokens (often ~2x). Table encodes STANDARD-context rates. SC4 to model the cliff.",
-    "openai_residency": "OpenAI adds a 10% data-residency uplift on regional endpoints for models released on/after 2026-03-05. Table encodes standard (non-regional) rates. SC4."
+    "openai_residency": "OpenAI adds a 10% data-residency uplift on regional endpoints for models released on/after 2026-03-05. Table encodes standard (non-regional) rates. SC4.",
+    "partial_check_2026_10_12": "Partial re-check 2026-10-12 against provider pricing pages. verified_at NOT advanced: OpenAI gpt-4o-mini/gpt-4o/o3, Gemini gemini-3.5-flash and xAI grok-4.1-fast could not be verified (absent from their provider pricing pages); Qwen qwen-plus output is ambiguous (page shows 1.2 non-thinking / 4 thinking vs 2.4 here). Corrected only rows with a confirmed difference: deepseek-v4-flash (legacy name, now served and billed as V4.1-Flash) off-peak 0.22/0.66/cache 0.007 -> 0.15/0.6/cache 0.003; qwen-flash input 0.1 -> 0.05; qwen-max 2.0/6.0 -> 1.6/6.4 (International). See PR fix/precios-y-dockerfile."
   },
   "providers": {
     "anthropic": {
@@ -215,17 +216,17 @@
       "models": {
         "tier_fast": {
           "model_id": "deepseek-v4-flash",
-          "input_price_per_1m": 0.22,
-          "output_price_per_1m": 0.66,
+          "input_price_per_1m": 0.15,
+          "output_price_per_1m": 0.6,
           "context_window": 1000000,
-          "cached_input_price_per_1m": 0.007
+          "cached_input_price_per_1m": 0.003
         },
         "tier_balanced": {
           "model_id": "deepseek-v4-flash",
-          "input_price_per_1m": 0.22,
-          "output_price_per_1m": 0.66,
+          "input_price_per_1m": 0.15,
+          "output_price_per_1m": 0.6,
           "context_window": 1000000,
-          "cached_input_price_per_1m": 0.007
+          "cached_input_price_per_1m": 0.003
         },
         "tier_powerful": {
           "model_id": "deepseek-v4-pro",
@@ -253,7 +254,7 @@
       "models": {
         "tier_fast": {
           "model_id": "qwen-flash",
-          "input_price_per_1m": 0.1,
+          "input_price_per_1m": 0.05,
           "output_price_per_1m": 0.4,
           "context_window": 1000000
         },
@@ -265,8 +266,8 @@
         },
         "tier_powerful": {
           "model_id": "qwen-max",
-          "input_price_per_1m": 2.0,
-          "output_price_per_1m": 6.0,
+          "input_price_per_1m": 1.6,
+          "output_price_per_1m": 6.4,
           "context_window": 32000,
           "cached_input_price_per_1m": 0.25
         }
