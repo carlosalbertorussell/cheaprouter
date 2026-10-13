@@ -12,7 +12,7 @@ Add to `claude_desktop_config.json`:
   "mcpServers": {
     "cheaprouter": {
       "type": "http",
-      "url": "https://<your-cheaprouter-endpoint>.mcpize.run/mcp"
+      "url": "https://cheaprouter.mcpize.run/mcp"
     }
   }
 }
