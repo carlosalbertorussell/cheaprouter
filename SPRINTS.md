@@ -7,7 +7,41 @@ One task per unit, PARTIAL-honest over DONE-false, closures noted inline.
 
 ## Active
 
-*(none — S1 shipped; pick the next from Backlog)*
+### SD1 — Skill packaging + MCP-registry distribution (free discovery)
+
+**Goal:** make the server *discoverable*, not just hosted. MCPize hosts the server;
+the official MCP registry (`registry.modelcontextprotocol.io`) is the discovery layer
+that Smithery and other aggregators ingest. Hosted ≠ discoverable (review CR-07) — the
+server is at 0 stars and in no registry. This lists it (pointing at the MCPize
+endpoint) and ships a skill so agents know when to use it. Free; the router stays the
+funnel. Monetization stays with the pricing/certification layer, out of scope here.
+
+**Delivered on this branch:**
+- `skills/cheaprouter/SKILL.md` — free wrapper skill: when/how to use the router tools
+  (route/estimate/pricing/health/spend) and the pricing head, BYOK stated. The adoption
+  aid; never gated or priced.
+- `server.json` — official MCP registry manifest, **remote** server (`remotes`,
+  `type: streamable-http`), namespace `io.github.carlosalbertorussell/cheaprouter`
+  (GitHub namespace, NOT domain — the endpoint is on mcpize.run, so a domain namespace
+  would fail verification; github-oidc only authorizes `io.github.*`). Registers a
+  signpost to the MCPize endpoint; hosts nothing.
+- `.github/workflows/publish-registry.yml` — publishes via the official `mcp-publisher`
+  CLI with GitHub OIDC (no stored secret). Triggers on a `v*` tag or manual dispatch.
+
+**Carlos must do before publishing:** set the real MCPize endpoint in `server.json`
+(`remotes[0].url`, ships as `https://YOUR-ENDPOINT.mcpize.run/mcp`). Likely
+`cheaprouter.mcpize.run` per the repo's docs pattern, but confirm against the actual
+deployment — do not publish a signpost to the wrong address.
+
+**CR-08 (first-call friction) — eval, deferred:** before reading registry conversion,
+evaluate removing the MCPize account/key barrier to the first call. The server is
+already BYOK, so the MCPize key is the only friction between discovery and a working
+first call; if it needs a signup, installs won't convert and the channel gets misread
+as "registry doesn't work" rather than "the barrier does." Decision + config, not code.
+
+**Unconfirmed (recorded, not a blocker):** whether Smithery surfaces an ingested
+*remote* entry, and with what prominence vs infra-hosted ones. Registry-side ingestion
+is documented; Smithery's display behaviour is not.
 
 <details>
 <summary>S1 — Spend Analytics (Pro tier foundation) — SHIPPED</summary>
