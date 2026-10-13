@@ -1,0 +1,12 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.carlosalbertorussell/cheaprouter",
+  "description": "Routes each LLM completion to the cheapest capable provider across 8 providers (BYOK; no keys stored).",
+  "version": "1.1.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://YOUR-ENDPOINT.mcpize.run/mcp"
+    }
+  ]
+}
