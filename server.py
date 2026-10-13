@@ -263,7 +263,7 @@ def _stale_price_refusal() -> Optional[str]:
 )
 async def arbitrage_get_pricing(params: GetPricingInput) -> str:
     """
-    Return a full price comparison table across all seven providers for a given
+    Return a full price comparison table across all 8 providers for a given
     capability tier and token volume.
 
     Pass api_keys to see which providers you have access to. Providers without

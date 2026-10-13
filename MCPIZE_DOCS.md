@@ -22,7 +22,7 @@ Once installed via MCPize, connect using your MCP client's remote server URL fie
   "mcpServers": {
     "cheaprouter": {
       "type": "http",
-      "url": "https://your-cheaprouter-endpoint.mcpize.com/mcp"
+      "url": "https://cheaprouter.mcpize.run/mcp"
     }
   }
 }
