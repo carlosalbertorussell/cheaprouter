@@ -3,6 +3,7 @@
 ![CI](https://github.com/carlosalbertorussell/cheaprouter/actions/workflows/ci.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+[![MCPize](https://mcpize.com/badge/@crussell/cheaprouter)](https://mcpize.com/mcp/cheaprouter)
 
 An MCP server that routes LLM completion requests to the cheapest available provider,
 selecting dynamically based on token price, region, latency, and availability.
@@ -11,6 +12,27 @@ selecting dynamically based on token price, region, latency, and availability.
 credentials and stores no content.
 
 **Docs:** [CONNECT](CONNECT.md) · [MCPize tool reference](MCPIZE_DOCS.md) · [Architecture](ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Pipeline](PIPELINE.md) · [Pricing blueprint](PRICING_SERVER_BLUEPRINT.md) · [Pricing strategy](PRICING_STRATEGY.md) · [Ticker vision](TICKER_VISION.md) · [Roadmap](SPRINTS.md) · [Review response](REVIEW_RESPONSE.md)
+
+## Connect
+
+Hosted on MCPize. One-line install:
+
+```bash
+npx -y mcpize connect @crussell/cheaprouter --client claude
+```
+
+Per client:
+
+- **Claude:** `claude mcp add --transport http CheapRouter https://cheaprouter.mcpize.run`
+- **Cursor:** `cursor mcp add CheapRouter https://cheaprouter.mcpize.run`
+- **Windsurf:** `windsurf mcp add CheapRouter https://cheaprouter.mcpize.run`
+- **Cline:** `cline mcp add CheapRouter https://cheaprouter.mcpize.run`
+
+Direct MCP endpoint (streamable-http), for a manual client config:
+`https://cheaprouter.mcpize.run/mcp`
+
+> Hosted access currently requires a free MCPize account (OAuth sign-in). The code
+> is MIT, so you can also run your own instance for open, no-account access.
 
 ## Providers
 
