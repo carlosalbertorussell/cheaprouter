@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "verified_at": "2026-10-12",
-  "verified_by": "Verified 2026-10-12 (SC1b) against each provider's own current pricing/model pages: Anthropic platform.claude.com pricing; OpenAI per-model pages (gpt-4o-mini, gpt-4o, o3 - dropped from the pricing table page); Gemini ai.google.dev pricing+models; groq.com/pricing; Mistral docs.mistral.ai/inference/pricing (labelled input/cached/output); api-docs.deepseek.com pricing; Alibaba Model Studio model-pricing + context-cache (International/Singapore); docs.x.ai/developers/pricing. All 21 rows re-read; no number taken from OpenRouter or aggregators. Caveats: Mistral '-latest' alias targets are not published on any Mistral page (priced as Small 4 / Large 3, the current non-preview models); qwen-max cache = 20% of input per the provider's implicit-cache rule. Prior verification: 2026-09-05 (SC1).",
+  "verified_at": "2026-11-01",
+  "verified_by": "Verified 2026-11-01 (SC1c catalog sweep) against each provider's current pricing pages. RE-READ & updated: OpenAI (gpt-4o-mini/gpt-4o/o3 all deprecated & off the pricing page -> migrated to gpt-6-luna/gpt-6.1-terra/gpt-6.1-sol, prices read from developers.openai.com; cache rates not published there, omitted; context_window carried, not re-read); Mistral (Large 3->Large 4 0.7/2.1, Small 4 cache 0.015/Large 4 cache 0.07 now modelled, docs.mistral.ai); DeepSeek (deepseek-v4-flash renamed deepseek-flash per api-docs.deepseek.com; off-peak prices identical); Grok (grok-4.6->grok-4.7 flagship, same price, docs.x.ai; grok-4.3 still listed, unchanged). RE-READ, NO CHANGE: Gemini (3.1-flash-lite 0.25/1.5 and 3.1-pro-preview 2/12 still current, ai.google.dev; gemini-4-argon flagship at promo 2/10 until Dec 1 then 4/20 - not adopted to avoid a promo-priced anchor). CARRIED, NOT RE-READ (flagged): Groq (groq.com pages are marketing, no prices; needs console.groq.com); Qwen (names appear moved to qwen3.8-flash/qwen3.7-plus/qwen3.8-max but no prices published on the models page; needs a priced page). FLAGGED FOR FOLLOW-UP: Anthropic Haiku/Sonnet/Opus 4.x are now LEGACY - 5.5 is much cheaper (Haiku 5.5 0.10/0.50 vs 1/5; Sonnet 5.5 2/10; Opus 5.5 4/20) but claude.com/pricing does not show the 5.5 API model IDs; migration needs verified IDs. 4.x kept (still listed, prices unchanged). No number taken from OpenRouter or aggregators. Prior: 2026-10-12 (SC1b), 2026-09-05 (SC1).",
   "max_age_days": 45,
   "currency": "USD",
   "unit": "per_1m_tokens",
@@ -16,14 +16,16 @@
     "grok": "https://docs.x.ai/docs/models"
   },
   "notes": {
-    "grok": "grok-4 / grok-4.1 / grok-4.1-fast / grok-3 not on xAI pricing as of 2026-10-12. Current: 4.3 (fast and balanced, SC1b), 4.6 (flagship). Context windows not re-modelled (page lists 4.3 at 1M).",
+    "grok": "grok-4.3 (fast+balanced) and grok-4.7 (flagship) current on docs.x.ai as of 2026-11-01; grok-4.7 replaced grok-4.6 at the same price (2/6/0.5). grok-4.20 variants priced same as 4.3; grok-build-0.1 (256k) is cheaper (1/2) but build-oriented, not adopted for general use.",
     "caching": "cached_input_price_per_1m modelled for Anthropic, OpenAI, Gemini, DeepSeek, Grok and qwen-max. Mistral (Small 4 0.015, Large 3 0.05) and qwen-flash/qwen-plus (implicit cache 20% of input) offer cache but are not modelled here - they bill cache tokens at the full input rate (never advantaged). Backlog.",
-    "deepseek": "Encoded at OFF-PEAK rates. DeepSeek bills peak hours (01:00-04:00 & 06:00-10:00 UTC, Mon-Fri) at ~2x. deepseek-chat/deepseek-reasoner aliases retired 2026-07-24; now deepseek-v4-flash / deepseek-v4-pro. SC4 to model time-of-day.",
-    "qwen": "Encoded at International (Singapore) endpoint rates. Same model differs by region (Beijing/Tokyo/Frankfurt/Virginia). qwen-turbo deprecated -> qwen-flash. SC4 to model region.",
+    "deepseek": "Encoded at OFF-PEAK rates. DeepSeek bills peak hours (01:00-04:00 & 06:00-10:00 UTC, Mon-Fri) at ~2x. deepseek-chat/deepseek-reasoner retired 2026-07-24; deepseek-v4-flash renamed to deepseek-flash 2026-11 (legacy name still accepted). Now deepseek-flash / deepseek-v4-pro. SC4 to model time-of-day.",
+    "qwen": "Encoded at International (Singapore) endpoint rates. qwen-turbo deprecated -> qwen-flash. 2026-11-01 CARRIED, NOT RE-READ: Model Studio now lists qwen3.8-flash / qwen3.7-plus / qwen3.8-max but publishes no prices on the models page; qwen-flash/plus/max rows kept at 2026-10-12 values pending a priced read. SC4 to model region.",
     "long_context": "Gemini, Anthropic, Grok, and OpenAI flagships apply a higher meter above ~200K tokens (often ~2x). Table encodes STANDARD-context rates. SC4 to model the cliff.",
     "openai_residency": "OpenAI adds a 10% data-residency uplift on regional endpoints for models released on/after 2026-03-05. Table encodes standard (non-regional) rates. SC4.",
-    "openai_lifecycle": "gpt-4o-mini, gpt-4o and o3 kept by decision (SC1b) and priced from their model pages; they are no longer on OpenAI's pricing table. o3 page marks it Deprecated (succeeded by GPT-5); snapshot gpt-4o-2024-05-13 shuts down 2026-10-23, o3-2025-04-16 on 2026-12-11. OpenAI migration is a separate backlog item.",
-    "qwen_plus_mode": "qwen-plus output encoded at NON-THINKING rate (1.2, API default). Thinking mode bills 4.0. SC1b decision."
+    "openai_lifecycle": "Migrated 2026-11-01 (SC1c): gpt-4o-mini/gpt-4o/o3 are all deprecated and off OpenAI's pricing page (gpt-4o-2024-05-13 shut down 2026-10-23; o3 shuts down 2026-12-11) -> gpt-6-luna / gpt-6.1-terra / gpt-6.1-sol. Cache rates are not published on developers.openai.com, so omitted (cache billed at full input rate). context_window carried from the prior tiers, NOT re-read. Did NOT adopt gpt-5.6-sol (promo price $4/$20 only through ~2026-11-21).",
+    "qwen_plus_mode": "qwen-plus output encoded at NON-THINKING rate (1.2, API default). Thinking mode bills 4.0. SC1b decision.",
+    "anthropic_lifecycle": "2026-11-01: Haiku 4.5 / Sonnet 4.6 / Opus 4.6 are now LEGACY (still listed & working at these prices). Current 5.5 line is much cheaper (Haiku 5.5 0.10/0.50 vs 1/5; Sonnet 5.5 2/10 vs 3/15; Opus 5.5 4/20 vs 5/25) but claude.com/pricing does not expose the 5.5 API model IDs; migration pending verified IDs. STRONG follow-up (Haiku 5.5 ~10x cheaper).",
+    "groq_2026_11": "CARRIED, NOT RE-READ 2026-11-01: groq.com pages are marketing with no model prices; needs console.groq.com (auth). llama-3.1-8b-instant / llama-3.3-70b-versatile rows kept at 2026-10-12 values."
   },
   "providers": {
     "anthropic": {
@@ -75,33 +77,30 @@
       "protocol": "openai",
       "models": {
         "tier_fast": {
-          "model_id": "gpt-4o-mini",
-          "input_price_per_1m": 0.15,
-          "output_price_per_1m": 0.6,
-          "context_window": 128000,
-          "cached_input_price_per_1m": 0.075
+          "model_id": "gpt-6-luna",
+          "input_price_per_1m": 0.1,
+          "output_price_per_1m": 0.5,
+          "context_window": 128000
         },
         "tier_balanced": {
-          "model_id": "gpt-4o",
-          "input_price_per_1m": 2.5,
-          "output_price_per_1m": 10.0,
-          "context_window": 128000,
-          "cached_input_price_per_1m": 1.25
+          "model_id": "gpt-6.1-terra",
+          "input_price_per_1m": 1.0,
+          "output_price_per_1m": 5.0,
+          "context_window": 128000
         },
         "tier_powerful": {
-          "model_id": "o3",
+          "model_id": "gpt-6.1-sol",
           "input_price_per_1m": 2.0,
-          "output_price_per_1m": 8.0,
-          "context_window": 200000,
-          "cached_input_price_per_1m": 0.5
+          "output_price_per_1m": 10.0,
+          "context_window": 200000
         }
       },
       "refresh": {
         "strategy": "openrouter",
         "ids": {
-          "tier_fast": "openai/gpt-4o-mini",
-          "tier_balanced": "openai/gpt-4o",
-          "tier_powerful": "openai/o3"
+          "tier_fast": "openai/gpt-6-luna",
+          "tier_balanced": "openai/gpt-6.1-terra",
+          "tier_powerful": "openai/gpt-6.1-sol"
         }
       }
     },
@@ -184,19 +183,22 @@
           "model_id": "mistral-small-latest",
           "input_price_per_1m": 0.15,
           "output_price_per_1m": 0.6,
-          "context_window": 32000
+          "context_window": 32000,
+          "cached_input_price_per_1m": 0.015
         },
         "tier_balanced": {
           "model_id": "mistral-large-latest",
-          "input_price_per_1m": 0.5,
-          "output_price_per_1m": 1.5,
-          "context_window": 128000
+          "input_price_per_1m": 0.7,
+          "output_price_per_1m": 2.1,
+          "context_window": 128000,
+          "cached_input_price_per_1m": 0.07
         },
         "tier_powerful": {
           "model_id": "mistral-large-latest",
-          "input_price_per_1m": 0.5,
-          "output_price_per_1m": 1.5,
-          "context_window": 128000
+          "input_price_per_1m": 0.7,
+          "output_price_per_1m": 2.1,
+          "context_window": 128000,
+          "cached_input_price_per_1m": 0.07
         }
       },
       "refresh": {
@@ -216,14 +218,14 @@
       "protocol": "openai",
       "models": {
         "tier_fast": {
-          "model_id": "deepseek-v4-flash",
+          "model_id": "deepseek-flash",
           "input_price_per_1m": 0.15,
           "output_price_per_1m": 0.6,
           "context_window": 1000000,
           "cached_input_price_per_1m": 0.003
         },
         "tier_balanced": {
-          "model_id": "deepseek-v4-flash",
+          "model_id": "deepseek-flash",
           "input_price_per_1m": 0.15,
           "output_price_per_1m": 0.6,
           "context_window": 1000000,
@@ -240,8 +242,8 @@
       "refresh": {
         "strategy": "openrouter",
         "ids": {
-          "tier_fast": "deepseek/deepseek-v4-flash",
-          "tier_balanced": "deepseek/deepseek-v4-flash",
+          "tier_fast": "deepseek/deepseek-flash",
+          "tier_balanced": "deepseek/deepseek-flash",
           "tier_powerful": "deepseek/deepseek-v4-pro"
         }
       }
@@ -299,7 +301,7 @@
           "cached_input_price_per_1m": 0.2
         },
         "tier_powerful": {
-          "model_id": "grok-4.6",
+          "model_id": "grok-4.7",
           "input_price_per_1m": 2.0,
           "output_price_per_1m": 6.0,
           "context_window": 500000,
@@ -311,7 +313,7 @@
         "ids": {
           "tier_fast": "x-ai/grok-4.3",
           "tier_balanced": "x-ai/grok-4.3",
-          "tier_powerful": "x-ai/grok-4.6"
+          "tier_powerful": "x-ai/grok-4.7"
         }
       }
     }

@@ -15,7 +15,7 @@ def _run(coro):
 def test_get_returns_price_and_provenance():
     out = json.loads(_run(ps.pricing_get(ps.PricingGetInput(provider="deepseek", tier="tier_fast"))))
     assert out["provider"] == "deepseek"
-    assert out["model_id"] == "deepseek-v4-flash"
+    assert out["model_id"] == "deepseek-flash"
     assert out["price_per_1m_usd"]["input_price_per_1m"] > 0
     # provenance-first: the block is present and names the tier
     assert out["provenance"]["tier"] == "verified"
