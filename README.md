@@ -38,7 +38,7 @@ Direct MCP endpoint (streamable-http), for a manual client config:
 
 | Provider | Region | Tier fast | Tier balanced | Tier powerful |
 |----------|--------|-----------|---------------|---------------|
-| Anthropic | US | claude-haiku-4-5 | claude-sonnet-4-6 | claude-opus-4-6 |
+| Anthropic | US | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 |
 | OpenAI | US | gpt-6-luna | gpt-6.1-terra | gpt-6.1-sol |
 | Google Gemini | US | gemini-3.1-flash-lite | gemini-3.1-flash-lite | gemini-3.1-pro-preview |
 | Groq | US | llama-3.1-8b-instant | llama-3.3-70b-versatile | llama-3.3-70b-versatile |

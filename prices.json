@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "verified_at": "2026-11-01",
-  "verified_by": "Verified 2026-11-01 (SC1c catalog sweep) against each provider's current pricing pages. RE-READ & updated: OpenAI (gpt-4o-mini/gpt-4o/o3 all deprecated & off the pricing page -> migrated to gpt-6-luna/gpt-6.1-terra/gpt-6.1-sol, prices read from developers.openai.com; cache rates not published there, omitted; context_window carried, not re-read); Mistral (Large 3->Large 4 0.7/2.1, Small 4 cache 0.015/Large 4 cache 0.07 now modelled, docs.mistral.ai); DeepSeek (deepseek-v4-flash renamed deepseek-flash per api-docs.deepseek.com; off-peak prices identical); Grok (grok-4.6->grok-4.7 flagship, same price, docs.x.ai; grok-4.3 still listed, unchanged). RE-READ, NO CHANGE: Gemini (3.1-flash-lite 0.25/1.5 and 3.1-pro-preview 2/12 still current, ai.google.dev; gemini-4-argon flagship at promo 2/10 until Dec 1 then 4/20 - not adopted to avoid a promo-priced anchor). CARRIED, NOT RE-READ (flagged): Groq (groq.com pages are marketing, no prices; needs console.groq.com); Qwen (names appear moved to qwen3.8-flash/qwen3.7-plus/qwen3.8-max but no prices published on the models page; needs a priced page). FLAGGED FOR FOLLOW-UP: Anthropic Haiku/Sonnet/Opus 4.x are now LEGACY - 5.5 is much cheaper (Haiku 5.5 0.10/0.50 vs 1/5; Sonnet 5.5 2/10; Opus 5.5 4/20) but claude.com/pricing does not show the 5.5 API model IDs; migration needs verified IDs. 4.x kept (still listed, prices unchanged). No number taken from OpenRouter or aggregators. Prior: 2026-10-12 (SC1b), 2026-09-05 (SC1).",
+  "verified_by": "Verified 2026-11-01 (SC1c catalog sweep) against each provider's current pricing pages. RE-READ & updated: OpenAI (gpt-4o-mini/gpt-4o/o3 all deprecated & off the pricing page -> migrated to gpt-6-luna/gpt-6.1-terra/gpt-6.1-sol, prices read from developers.openai.com; cache rates not published there, omitted; context_window carried, not re-read); Mistral (Large 3->Large 4 0.7/2.1, Small 4 cache 0.015/Large 4 cache 0.07 now modelled, docs.mistral.ai); DeepSeek (deepseek-v4-flash renamed deepseek-flash per api-docs.deepseek.com; off-peak prices identical); Grok (grok-4.6->grok-4.7 flagship, same price, docs.x.ai; grok-4.3 still listed, unchanged). RE-READ, NO CHANGE: Gemini (3.1-flash-lite 0.25/1.5 and 3.1-pro-preview 2/12 still current, ai.google.dev; gemini-4-argon flagship at promo 2/10 until Dec 1 then 4/20 - not adopted to avoid a promo-priced anchor). CARRIED, NOT RE-READ (flagged): Groq (groq.com pages are marketing, no prices; needs console.groq.com); Qwen (names appear moved to qwen3.8-flash/qwen3.7-plus/qwen3.8-max but no prices published on the models page; needs a priced page). Anthropic migrated to the 5.5 line (claude-haiku-5-5 / claude-sonnet-5-5 / claude-opus-5-5; IDs from platform.claude.com, prices from claude.com/pricing; 4.x now legacy, ~10x cheaper on Haiku). No number taken from OpenRouter or aggregators. Prior: 2026-10-12 (SC1b), 2026-09-05 (SC1).",
   "max_age_days": 45,
   "currency": "USD",
   "unit": "per_1m_tokens",
@@ -24,7 +24,7 @@
     "openai_residency": "OpenAI adds a 10% data-residency uplift on regional endpoints for models released on/after 2026-03-05. Table encodes standard (non-regional) rates. SC4.",
     "openai_lifecycle": "Migrated 2026-11-01 (SC1c): gpt-4o-mini/gpt-4o/o3 are all deprecated and off OpenAI's pricing page (gpt-4o-2024-05-13 shut down 2026-10-23; o3 shuts down 2026-12-11) -> gpt-6-luna / gpt-6.1-terra / gpt-6.1-sol. Cache rates are not published on developers.openai.com, so omitted (cache billed at full input rate). context_window carried from the prior tiers, NOT re-read. Did NOT adopt gpt-5.6-sol (promo price $4/$20 only through ~2026-11-21).",
     "qwen_plus_mode": "qwen-plus output encoded at NON-THINKING rate (1.2, API default). Thinking mode bills 4.0. SC1b decision.",
-    "anthropic_lifecycle": "2026-11-01: Haiku 4.5 / Sonnet 4.6 / Opus 4.6 are now LEGACY (still listed & working at these prices). Current 5.5 line is much cheaper (Haiku 5.5 0.10/0.50 vs 1/5; Sonnet 5.5 2/10 vs 3/15; Opus 5.5 4/20 vs 5/25) but claude.com/pricing does not expose the 5.5 API model IDs; migration pending verified IDs. STRONG follow-up (Haiku 5.5 ~10x cheaper).",
+    "anthropic_lifecycle": "Migrated 2026-11-01 to the 5.5 line (IDs confirmed on platform.claude.com, prices on claude.com/pricing): claude-haiku-5-5 0.10/0.50 (cache 0.01), claude-sonnet-5-5 2/10 (0.10), claude-opus-5-5 4/20 (0.20). Replaced the now-legacy Haiku 4.5 / Sonnet 4.6 / Opus 4.6 (were 1/5, 3/15, 5/25) - Haiku ~10x cheaper. Haiku 5.5 prices are the <=100K-token tier; >100K bills higher (0.50/2.50, cache 0.05) - standard-context rates encoded, SC4 for the cliff.",
     "groq_2026_11": "CARRIED, NOT RE-READ 2026-11-01: groq.com pages are marketing with no model prices; needs console.groq.com (auth). llama-3.1-8b-instant / llama-3.3-70b-versatile rows kept at 2026-10-12 values."
   },
   "providers": {
@@ -39,33 +39,33 @@
       },
       "models": {
         "tier_fast": {
-          "model_id": "claude-haiku-4-5-20251001",
-          "input_price_per_1m": 1.0,
-          "output_price_per_1m": 5.0,
+          "model_id": "claude-haiku-5-5",
+          "input_price_per_1m": 0.1,
+          "output_price_per_1m": 0.5,
+          "context_window": 200000,
+          "cached_input_price_per_1m": 0.01
+        },
+        "tier_balanced": {
+          "model_id": "claude-sonnet-5-5",
+          "input_price_per_1m": 2.0,
+          "output_price_per_1m": 10.0,
           "context_window": 200000,
           "cached_input_price_per_1m": 0.1
         },
-        "tier_balanced": {
-          "model_id": "claude-sonnet-4-6",
-          "input_price_per_1m": 3.0,
-          "output_price_per_1m": 15.0,
-          "context_window": 200000,
-          "cached_input_price_per_1m": 0.3
-        },
         "tier_powerful": {
-          "model_id": "claude-opus-4-6",
-          "input_price_per_1m": 5.0,
-          "output_price_per_1m": 25.0,
+          "model_id": "claude-opus-5-5",
+          "input_price_per_1m": 4.0,
+          "output_price_per_1m": 20.0,
           "context_window": 200000,
-          "cached_input_price_per_1m": 0.5
+          "cached_input_price_per_1m": 0.2
         }
       },
       "refresh": {
         "strategy": "openrouter",
         "ids": {
-          "tier_fast": "anthropic/claude-haiku-4.5",
-          "tier_balanced": "anthropic/claude-sonnet-4.6",
-          "tier_powerful": "anthropic/claude-opus-4.6"
+          "tier_fast": "anthropic/claude-haiku-5.5",
+          "tier_balanced": "anthropic/claude-sonnet-5.5",
+          "tier_powerful": "anthropic/claude-opus-5.5"
         }
       }
     },
