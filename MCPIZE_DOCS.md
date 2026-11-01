@@ -59,9 +59,9 @@ to semantically equivalent models across all providers:
 
 | Tier | Best for | Example models |
 |------|----------|----------------|
-| `tier_fast` | Simple tasks, high volume, cost-sensitive | Haiku 4.5, GPT-4o mini, Gemini 3.1 Flash-Lite, Llama 3.1 8B, Qwen Flash, DeepSeek V4 Flash, Grok 4.3 |
-| `tier_balanced` | Most everyday tasks | Sonnet 4.6, GPT-4o, Gemini 3.1 Flash-Lite, Llama 3.3 70B, Qwen Plus, DeepSeek V4 Flash, Grok 4.3 |
-| `tier_powerful` | Complex reasoning, long context | Opus 4.6, o3, Gemini 3.1 Pro (preview), Mistral Large 3, DeepSeek V4 Pro, Qwen Max, Grok 4.6 |
+| `tier_fast` | Simple tasks, high volume, cost-sensitive | Haiku 4.5, GPT-6 Luna, Gemini 3.1 Flash-Lite, Llama 3.1 8B, Qwen Flash, DeepSeek Flash, Grok 4.3 |
+| `tier_balanced` | Most everyday tasks | Sonnet 4.6, GPT-6.1 Terra, Gemini 3.1 Flash-Lite, Llama 3.3 70B, Qwen Plus, DeepSeek Flash, Grok 4.3 |
+| `tier_powerful` | Complex reasoning, long context | Opus 4.6, GPT-6.1 Sol, Gemini 3.1 Pro (preview), Mistral Large 4, DeepSeek V4 Pro, Qwen Max, Grok 4.7 |
 
 ---
 
@@ -505,7 +505,7 @@ How prices have changed over time — the citable, provenanced series. Pass
 `trajectory_only` with a `provider` + `model_id` for a clean oldest→newest price
 series.
 ```json
-{ "provider": "deepseek", "model_id": "deepseek-v4-flash", "trajectory_only": true }
+{ "provider": "deepseek", "model_id": "deepseek-flash", "trajectory_only": true }
 ```
 
 ### `pricing_observed`
