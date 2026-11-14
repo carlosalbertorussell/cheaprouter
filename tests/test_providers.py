@@ -99,3 +99,30 @@ def test_qwen_uses_singapore_endpoint():
     # (alibabacloud.com/help/en/model-studio/base-url). client.py appends
     # /v1/chat/completions, giving the documented .../compatible-mode/v1 path.
     assert PROVIDERS["qwen"].base_url == "https://dashscope-intl.aliyuncs.com/compatible-mode"
+
+
+def test_openai_cache_read_rates_modelled_sc1e():
+    # SC1e (2026-11-14): developers.openai.com/api/docs/pricing publishes cache-read
+    # rates; only cache-read is modelled (no cache-write). Prices unchanged.
+    want = {"tier_fast": ("gpt-6-luna", 0.1, 0.5, 0.01),
+            "tier_balanced": ("gpt-6.1-terra", 1.0, 5.0, 0.05),
+            "tier_powerful": ("gpt-6.1-sol", 2.0, 10.0, 0.1)}
+    for tier, row in want.items():
+        m = PROVIDERS["openai"].models[tier]
+        assert (m.model_id, m.input_price_per_1m, m.output_price_per_1m,
+                m.cached_input_price_per_1m) == row
+
+
+def test_context_windows_sc1e():
+    # SC1e (2026-11-14), from each provider's model pages.
+    want = {
+        "anthropic": {"tier_fast": 1000000, "tier_balanced": 1000000, "tier_powerful": 1000000},
+        "openai": {"tier_fast": 1050000, "tier_balanced": 1050000, "tier_powerful": 1050000},
+        # Mistral Small 4 page says "256k"; 256000 is the conservative reading.
+        "mistral": {"tier_fast": 256000, "tier_balanced": 1000000, "tier_powerful": 1000000},
+        "grok": {"tier_fast": 1000000, "tier_balanced": 1000000, "tier_powerful": 500000},
+        "gemini": {"tier_fast": 1048576, "tier_balanced": 1048576, "tier_powerful": 1048576},
+    }
+    for pid, tiers in want.items():
+        for tier, ctx in tiers.items():
+            assert PROVIDERS[pid].models[tier].context_window == ctx, (pid, tier)

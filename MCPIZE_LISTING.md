@@ -64,16 +64,16 @@ claude-haiku-5-5, gpt-6-luna, deepseek-flash — not retired IDs).
 ## 3. Current verified pricing (for the listing / a pricing tab)
 
 <!-- BEGIN GENERATED: prices (scripts/gen_listing.py) -->
-Prices are USD per 1M tokens from `prices.json` (verified_at 2026-11-01, max_age_days 45). Cache = the cache-read rate cheaprouter models; — means cached tokens are billed at the full input rate.
+Prices are USD per 1M tokens from `prices.json` (verified_at 2026-11-14, max_age_days 45). Cache = the cache-read rate cheaprouter models; — means cached tokens are billed at the full input rate.
 
 | Provider | Tier | Model | Input | Output | Cache | Status |
 |----------|------|-------|------:|-------:|------:|--------|
 | Anthropic | fast | claude-haiku-5-5 | 0.10 | 0.50 | 0.01 | re-read |
 | Anthropic | balanced | claude-sonnet-5-5 | 2.00 | 10.00 | 0.10 | re-read |
 | Anthropic | powerful | claude-opus-5-5 | 4.00 | 20.00 | 0.20 | re-read |
-| OpenAI | fast | gpt-6-luna | 0.10 | 0.50 | — | re-read |
-| OpenAI | balanced | gpt-6.1-terra | 1.00 | 5.00 | — | re-read |
-| OpenAI | powerful | gpt-6.1-sol | 2.00 | 10.00 | — | re-read |
+| OpenAI | fast | gpt-6-luna | 0.10 | 0.50 | 0.01 | re-read |
+| OpenAI | balanced | gpt-6.1-terra | 1.00 | 5.00 | 0.05 | re-read |
+| OpenAI | powerful | gpt-6.1-sol | 2.00 | 10.00 | 0.10 | re-read |
 | Google Gemini | fast/balanced | gemini-3.1-flash-lite | 0.25 | 1.50 | 0.025 | re-read |
 | Google Gemini | powerful | gemini-3.1-pro-preview | 2.00 | 12.00 | 0.20 | re-read |
 | Groq | fast | openai/gpt-oss-20b | 0.075 | 0.30 | 0.037 | re-read |

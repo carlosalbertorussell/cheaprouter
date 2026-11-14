@@ -1,31 +1,33 @@
 {
   "schema_version": 1,
-  "verified_at": "2026-11-01",
-  "verified_by": "Verified 2026-11-01 (SC1c catalog sweep) against each provider's current pricing pages. RE-READ & updated: OpenAI (gpt-4o-mini/gpt-4o/o3 all deprecated & off the pricing page -> migrated to gpt-6-luna/gpt-6.1-terra/gpt-6.1-sol, prices read from developers.openai.com; cache rates not published there, omitted; context_window carried, not re-read); Mistral (Large 3->Large 4 0.7/2.1, Small 4 cache 0.015/Large 4 cache 0.07 now modelled, docs.mistral.ai); DeepSeek (deepseek-v4-flash renamed deepseek-flash per api-docs.deepseek.com; off-peak prices identical); Grok (grok-4.6->grok-4.7 flagship, same price, docs.x.ai; grok-4.3 still listed, unchanged). RE-READ, NO CHANGE: Gemini (3.1-flash-lite 0.25/1.5 and 3.1-pro-preview 2/12 still current, ai.google.dev; gemini-4-argon flagship at promo 2/10 until Dec 1 then 4/20 - not adopted to avoid a promo-priced anchor). NOT RE-READ on 2026-11-01: Groq and Qwen (no priced page found then; both re-read 2026-11-14 in SC1d, below). Anthropic migrated to the 5.5 line (claude-haiku-5-5 / claude-sonnet-5-5 / claude-opus-5-5; IDs from platform.claude.com, prices from claude.com/pricing; 4.x now legacy, ~10x cheaper on Haiku). No number taken from OpenRouter or aggregators. Prior: 2026-10-12 (SC1b), 2026-09-05 (SC1). SC1d (2026-11-14, Groq and Qwen only; table-wide verified_at stays 2026-11-01 because the other six providers were not re-read): Groq MIGRATED - llama-3.1-8b-instant / llama-3.3-70b-versatile were shut down 2026-08-16 for free and developer accounts (console.groq.com/docs/deprecations) -> openai/gpt-oss-20b (fast, 0.075/0.30, cache 0.037) and openai/gpt-oss-120b (balanced+powerful, 0.15/0.60, cache 0.075), ctx 131072, prices re-read from the console.groq.com/docs/model/openai/* pages and checked by the owner on 2026-11-14; cache modelled because console.groq.com/docs/prompt-caching lists both models. Qwen RE-READ, NO PRICE CHANGE from alibabacloud.com/help/en/model-studio/model-pricing (Singapore): qwen-flash 0.05/0.40, qwen-plus 0.40/1.20 non-thinking, qwen-max 1.60/6.40 cache 0.32; priced-page link fixed (was /models, no prices); base_url switched to the Singapore host dashscope-intl.aliyuncs.com per alibabacloud.com/help/en/model-studio/base-url (dashscope.aliyuncs.com is China (Beijing)). Qwen context windows carried, not shown on either page.",
+  "verified_at": "2026-11-14",
+  "verified_by": "Verified 2026-11-14 (SC1e full price re-check) by the owner against each provider's official pricing page: all 8 providers now checked today - Anthropic, OpenAI, Gemini, Mistral, DeepSeek and Grok in SC1e, Groq and Qwen in SC1d (below). RE-READ, NO PRICE CHANGE on any input/output rate. OpenAI cache-read now modelled (gpt-6-luna 0.01, gpt-6.1-terra 0.05, gpt-6.1-sol 0.10, developers.openai.com/api/docs/pricing; cache-write not modelled). Context windows updated from the providers' model pages: Claude 5.5 Haiku/Sonnet/Opus 1000000 (platform.claude.com, '1M tokens'); gpt-6-luna/gpt-6.1-terra/gpt-6.1-sol 1050000; mistral-small-latest 256000 ('256k', conservative reading); mistral-large-latest 1000000; grok-4.3 1000000; grok-4.7 500000 and Gemini unchanged. Priced-page links refreshed for Anthropic, OpenAI, Gemini and Mistral. Not adopted (owner decisions): gemini-4-hydrogen, Ministral 3 3B/8B, and all promo prices. No number taken from OpenRouter or aggregators. Prior: Verified 2026-11-01 (SC1c catalog sweep) against each provider's current pricing pages. RE-READ & updated: OpenAI (gpt-4o-mini/gpt-4o/o3 all deprecated & off the pricing page -> migrated to gpt-6-luna/gpt-6.1-terra/gpt-6.1-sol, prices read from developers.openai.com; cache rates not published there, omitted; context_window carried, not re-read); Mistral (Large 3->Large 4 0.7/2.1, Small 4 cache 0.015/Large 4 cache 0.07 now modelled, docs.mistral.ai); DeepSeek (deepseek-v4-flash renamed deepseek-flash per api-docs.deepseek.com; off-peak prices identical); Grok (grok-4.6->grok-4.7 flagship, same price, docs.x.ai; grok-4.3 still listed, unchanged). RE-READ, NO CHANGE: Gemini (3.1-flash-lite 0.25/1.5 and 3.1-pro-preview 2/12 still current, ai.google.dev; gemini-4-argon flagship at promo 2/10 until Dec 1 then 4/20 - not adopted to avoid a promo-priced anchor). NOT RE-READ on 2026-11-01: Groq and Qwen (no priced page found then; both re-read 2026-11-14 in SC1d, below). Anthropic migrated to the 5.5 line (claude-haiku-5-5 / claude-sonnet-5-5 / claude-opus-5-5; IDs from platform.claude.com, prices from claude.com/pricing; 4.x now legacy, ~10x cheaper on Haiku). No number taken from OpenRouter or aggregators. Prior: 2026-10-12 (SC1b), 2026-09-05 (SC1). SC1d (2026-11-14, Groq and Qwen only; table-wide verified_at stays 2026-11-01 because the other six providers were not re-read): Groq MIGRATED - llama-3.1-8b-instant / llama-3.3-70b-versatile were shut down 2026-08-16 for free and developer accounts (console.groq.com/docs/deprecations) -> openai/gpt-oss-20b (fast, 0.075/0.30, cache 0.037) and openai/gpt-oss-120b (balanced+powerful, 0.15/0.60, cache 0.075), ctx 131072, prices re-read from the console.groq.com/docs/model/openai/* pages and checked by the owner on 2026-11-14; cache modelled because console.groq.com/docs/prompt-caching lists both models. Qwen RE-READ, NO PRICE CHANGE from alibabacloud.com/help/en/model-studio/model-pricing (Singapore): qwen-flash 0.05/0.40, qwen-plus 0.40/1.20 non-thinking, qwen-max 1.60/6.40 cache 0.32; priced-page link fixed (was /models, no prices); base_url switched to the Singapore host dashscope-intl.aliyuncs.com per alibabacloud.com/help/en/model-studio/base-url (dashscope.aliyuncs.com is China (Beijing)). Qwen context windows carried, not shown on either page.",
   "max_age_days": 45,
   "currency": "USD",
   "unit": "per_1m_tokens",
   "pricing_urls": {
-    "anthropic": "https://www.anthropic.com/pricing",
-    "openai": "https://openai.com/pricing",
-    "gemini": "https://ai.google.dev/pricing",
+    "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "openai": "https://developers.openai.com/api/docs/pricing",
+    "gemini": "https://aistudio.google.com/docs/pricing",
     "groq": "https://console.groq.com/docs/models",
-    "mistral": "https://mistral.ai/technology/",
+    "mistral": "https://docs.mistral.ai/inference/pricing",
     "deepseek": "https://api-docs.deepseek.com/quick_start/pricing",
     "qwen": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
     "grok": "https://docs.x.ai/docs/models"
   },
   "notes": {
-    "grok": "grok-4.3 (fast+balanced) and grok-4.7 (flagship) current on docs.x.ai as of 2026-11-01; grok-4.7 replaced grok-4.6 at the same price (2/6/0.5). grok-4.20 variants priced same as 4.3; grok-build-0.1 (256k) is cheaper (1/2) but build-oriented, not adopted for general use.",
-    "caching": "cached_input_price_per_1m modelled for Anthropic, Gemini, Groq, Mistral, DeepSeek, Grok and qwen-max (see each model row for the rate). OpenAI (cache rates not published on developers.openai.com, see openai_lifecycle) and qwen-flash/qwen-plus (implicit cache 20% of input) offer cache but are not modelled here - they bill cache tokens at the full input rate (never advantaged). Backlog.",
-    "deepseek": "Encoded at OFF-PEAK rates. DeepSeek bills peak hours (01:00-04:00 & 06:00-10:00 UTC, Mon-Fri) at ~2x. deepseek-chat/deepseek-reasoner retired 2026-07-24; deepseek-v4-flash renamed to deepseek-flash 2026-11 (legacy name still accepted). Now deepseek-flash / deepseek-v4-pro. SC4 to model time-of-day.",
+    "grok": "grok-4.3 (fast+balanced) and grok-4.7 (flagship) current on docs.x.ai as of 2026-11-01; grok-4.7 replaced grok-4.6 at the same price (2/6/0.5). grok-4.20 variants priced same as 4.3; grok-build-0.1 (256k) is cheaper (1/2) but build-oriented, not adopted for general use. SC1e (2026-11-14): prices unchanged; grok-4.3 context 1,000,000 per docs.x.ai (was 131072); grok-4.7 500k unchanged.",
+    "caching": "cached_input_price_per_1m modelled for Anthropic, OpenAI (since SC1e, 2026-11-14), Gemini, Groq, Mistral, DeepSeek, Grok and qwen-max (see each model row for the rate). Only the cache-read rate is modelled; cache-write surcharges (Anthropic, OpenAI) are not. qwen-flash/qwen-plus (implicit cache 20% of input) offer cache but are not modelled here - they bill cache tokens at the full input rate (never advantaged). Backlog.",
+    "deepseek": "Encoded at OFF-PEAK rates. DeepSeek bills peak hours (01:00-04:00 & 06:00-10:00 UTC, Mon-Fri, excluding Chinese public holidays) at 2x. deepseek-chat/deepseek-reasoner retired 2026-07-24; deepseek-v4-flash renamed to deepseek-flash 2026-11 (legacy name still accepted). deepseek-flash now runs on DeepSeek-V4.1-Flash-1017 (upgraded 2026-10-17, same ID and price; api-docs.deepseek.com/updates). Now deepseek-flash / deepseek-v4-pro. SC4 to model time-of-day.",
     "qwen": "Encoded at International (Singapore) rates, served from the Singapore endpoint https://dashscope-intl.aliyuncs.com/compatible-mode (per https://www.alibabacloud.com/help/en/model-studio/base-url: dashscope-intl = Singapore, dashscope = China (Beijing); API keys are region-bound, so a Singapore key is needed). Switched from dashscope.aliyuncs.com 2026-11-14 (SC1d). qwen-turbo deprecated -> qwen-flash. 2026-11-14 RE-READ, NO CHANGE from https://www.alibabacloud.com/help/en/model-studio/model-pricing: qwen-flash 0.05/0.40 (0-256K), qwen-plus 0.40/1.20 non-thinking (0-256K), qwen-max 1.60/6.40 (cache 0.32). Context windows are not shown on the pricing page and are carried. Newer models seen and not adopted (qwen3.7-flash per-request tiering, qwen3.7-plus promo ambiguity, qwen3.8-max): separate decision. SC4 to model region.",
-    "long_context": "Gemini, Anthropic, Grok, and OpenAI flagships apply a higher meter above ~200K tokens (often ~2x). Table encodes STANDARD-context rates. SC4 to model the cliff.",
+    "long_context": "Gemini, Grok and OpenAI flagships apply a higher meter above ~200K tokens (often ~2x). Anthropic: only Haiku 5.5 has a price step, at 100K (see anthropic_lifecycle); Sonnet 5.5 and Opus 5.5 bill the full 1M context at standard rates (platform.claude.com pricing, SC1e 2026-11-14). Table encodes STANDARD-context rates. SC4 to model the cliff.",
     "openai_residency": "OpenAI adds a 10% data-residency uplift on regional endpoints for models released on/after 2026-03-05. Table encodes standard (non-regional) rates. SC4.",
-    "openai_lifecycle": "Migrated 2026-11-01 (SC1c): gpt-4o-mini/gpt-4o/o3 are all deprecated and off OpenAI's pricing page (gpt-4o-2024-05-13 shut down 2026-10-23; o3 shuts down 2026-12-11) -> gpt-6-luna / gpt-6.1-terra / gpt-6.1-sol. Cache rates are not published on developers.openai.com, so omitted (cache billed at full input rate). context_window carried from the prior tiers, NOT re-read. Did NOT adopt gpt-5.6-sol (promo price $4/$20 only through ~2026-11-21).",
+    "openai_lifecycle": "Migrated 2026-11-01 (SC1c): gpt-4o-mini/gpt-4o/o3 are all deprecated and off OpenAI's pricing page (gpt-4o-2024-05-13 shut down 2026-10-23; o3 shuts down 2026-12-11) -> gpt-6-luna / gpt-6.1-terra / gpt-6.1-sol. SC1e (2026-11-14): developers.openai.com/api/docs/pricing now publishes cache-read rates (luna 0.01, terra 0.05, sol 0.10), now modelled; cache writes (30m/12h surcharges) not modelled. context_window re-read from the model pages: 1,050,000 for all three. No deprecation notice for luna, terra or sol. Did NOT adopt gpt-5.6-sol (promo price $4/$20 only through 2026-11-30).",
     "qwen_plus_mode": "qwen-plus output encoded at NON-THINKING rate (1.2, API default). Thinking mode bills 4.0. SC1b decision.",
-    "anthropic_lifecycle": "Migrated 2026-11-01 to the 5.5 line (IDs confirmed on platform.claude.com, prices on claude.com/pricing): claude-haiku-5-5 0.10/0.50 (cache 0.01), claude-sonnet-5-5 2/10 (0.10), claude-opus-5-5 4/20 (0.20). Replaced the now-legacy Haiku 4.5 / Sonnet 4.6 / Opus 4.6 (were 1/5, 3/15, 5/25) - Haiku ~10x cheaper. Haiku 5.5 prices are the <=100K-token tier; >100K bills higher (0.50/2.50, cache 0.05) - standard-context rates encoded, SC4 for the cliff.",
-    "groq_lifecycle": "Migrated 2026-11-14 (SC1d): llama-3.1-8b-instant and llama-3.3-70b-versatile were shut down 2026-08-16 for free and developer accounts (https://console.groq.com/docs/deprecations; still offered to enterprise at an unpublished price). A BYOK developer key would get a non-transient 404 with no failover. Now openai/gpt-oss-20b (fast) 0.075/0.30, cache 0.037 (https://console.groq.com/docs/model/openai/gpt-oss-20b; the 20b page shows 0.037, not the 0.0375 a strict 50% would give) and openai/gpt-oss-120b (balanced+powerful) 0.15/0.60, cache 0.075 (https://console.groq.com/docs/model/openai/gpt-oss-120b). Cache modelled because https://console.groq.com/docs/prompt-caching lists both. ctx 131072. Prices checked by the owner on 2026-11-14. The '/' in these model IDs is Groq's own naming, not an OpenRouter id."
+    "anthropic_lifecycle": "Migrated 2026-11-01 to the 5.5 line (IDs confirmed on platform.claude.com, prices on claude.com/pricing): claude-haiku-5-5 0.10/0.50 (cache 0.01), claude-sonnet-5-5 2/10 (0.10), claude-opus-5-5 4/20 (0.20). Replaced the now-legacy Haiku 4.5 / Sonnet 4.6 / Opus 4.6 (were 1/5, 3/15, 5/25) - Haiku ~10x cheaper. Haiku 5.5 prices are the <=100K-token tier; >100K bills higher (0.50/2.50, cache 0.05) - standard-context rates encoded, SC4 for the cliff. SC1e (2026-11-14): prices unchanged on platform.claude.com/docs/en/about-claude/pricing; context window 1M for all three (platform.claude.com models overview); all three Active.",
+    "groq_lifecycle": "Migrated 2026-11-14 (SC1d): llama-3.1-8b-instant and llama-3.3-70b-versatile were shut down 2026-08-16 for free and developer accounts (https://console.groq.com/docs/deprecations; still offered to enterprise at an unpublished price). A BYOK developer key would get a non-transient 404 with no failover. Now openai/gpt-oss-20b (fast) 0.075/0.30, cache 0.037 (https://console.groq.com/docs/model/openai/gpt-oss-20b; the 20b page shows 0.037, not the 0.0375 a strict 50% would give) and openai/gpt-oss-120b (balanced+powerful) 0.15/0.60, cache 0.075 (https://console.groq.com/docs/model/openai/gpt-oss-120b). Cache modelled because https://console.groq.com/docs/prompt-caching lists both. ctx 131072. Prices checked by the owner on 2026-11-14. The '/' in these model IDs is Groq's own naming, not an OpenRouter id.",
+    "mistral": "SC1e (2026-11-14), docs.mistral.ai: mistral-small-latest resolves to mistral-small-2603 (Mistral Small 4, context '256k', encoded as 256000, the conservative reading of 256k vs 262144); mistral-large-latest resolves to Mistral Large 4 (context 1M). Prices unchanged at https://docs.mistral.ai/inference/pricing (Small 4 0.15/0.60/0.015, Large 4 0.70/2.10/0.07, no sale price shown). Flagged, NOT adopted (owner decision C): Ministral 3 3B and 8B (cheaper, much smaller models); revisit with S7 capability scoring.",
+    "gemini": "SC1e (2026-11-14), aistudio.google.com/docs/pricing: 3.1-flash-lite and 3.1-pro-preview unchanged. Promos NOT adopted: gemini-4-argon and gemini-4-carbon 2/10 through 2026-11-30, then 4/20; gemini-3.8-flash and gemini-3.6-flash 0.75/3.75 through 2026-12-31. Flagged, NOT adopted (owner decision B): gemini-4-hydrogen (1.50/7.50, cache 0.075; looks Flash-class, name unconfirmed outside Google's docs); revisit with S7 capability scoring. gemini-3.1-flash-lite shuts down 2027-05-07 (replacement gemini-3.5-flash-lite)."
   },
   "providers": {
     "anthropic": {
@@ -42,21 +44,21 @@
           "model_id": "claude-haiku-5-5",
           "input_price_per_1m": 0.1,
           "output_price_per_1m": 0.5,
-          "context_window": 200000,
+          "context_window": 1000000,
           "cached_input_price_per_1m": 0.01
         },
         "tier_balanced": {
           "model_id": "claude-sonnet-5-5",
           "input_price_per_1m": 2.0,
           "output_price_per_1m": 10.0,
-          "context_window": 200000,
+          "context_window": 1000000,
           "cached_input_price_per_1m": 0.1
         },
         "tier_powerful": {
           "model_id": "claude-opus-5-5",
           "input_price_per_1m": 4.0,
           "output_price_per_1m": 20.0,
-          "context_window": 200000,
+          "context_window": 1000000,
           "cached_input_price_per_1m": 0.2
         }
       },
@@ -80,19 +82,22 @@
           "model_id": "gpt-6-luna",
           "input_price_per_1m": 0.1,
           "output_price_per_1m": 0.5,
-          "context_window": 128000
+          "context_window": 1050000,
+          "cached_input_price_per_1m": 0.01
         },
         "tier_balanced": {
           "model_id": "gpt-6.1-terra",
           "input_price_per_1m": 1.0,
           "output_price_per_1m": 5.0,
-          "context_window": 128000
+          "context_window": 1050000,
+          "cached_input_price_per_1m": 0.05
         },
         "tier_powerful": {
           "model_id": "gpt-6.1-sol",
           "input_price_per_1m": 2.0,
           "output_price_per_1m": 10.0,
-          "context_window": 200000
+          "context_window": 1050000,
+          "cached_input_price_per_1m": 0.1
         }
       },
       "refresh": {
@@ -191,21 +196,21 @@
           "model_id": "mistral-small-latest",
           "input_price_per_1m": 0.15,
           "output_price_per_1m": 0.6,
-          "context_window": 32000,
+          "context_window": 256000,
           "cached_input_price_per_1m": 0.015
         },
         "tier_balanced": {
           "model_id": "mistral-large-latest",
           "input_price_per_1m": 0.7,
           "output_price_per_1m": 2.1,
-          "context_window": 128000,
+          "context_window": 1000000,
           "cached_input_price_per_1m": 0.07
         },
         "tier_powerful": {
           "model_id": "mistral-large-latest",
           "input_price_per_1m": 0.7,
           "output_price_per_1m": 2.1,
-          "context_window": 128000,
+          "context_window": 1000000,
           "cached_input_price_per_1m": 0.07
         }
       },
@@ -298,14 +303,14 @@
           "model_id": "grok-4.3",
           "input_price_per_1m": 1.25,
           "output_price_per_1m": 2.5,
-          "context_window": 131072,
+          "context_window": 1000000,
           "cached_input_price_per_1m": 0.2
         },
         "tier_balanced": {
           "model_id": "grok-4.3",
           "input_price_per_1m": 1.25,
           "output_price_per_1m": 2.5,
-          "context_window": 131072,
+          "context_window": 1000000,
           "cached_input_price_per_1m": 0.2
         },
         "tier_powerful": {
