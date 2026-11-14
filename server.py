@@ -46,7 +46,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 from providers import PROVIDERS, VALID_TIERS, resolve_api_key
-from pricing import estimate_all_providers, format_pricing_table
+from pricing import CostEstimate, compute_savings, estimate_all_providers, format_pricing_table
 from pricing_table import price_table_status, is_stale, age_days, _allow_stale, VERIFIED_AT, MAX_AGE_DAYS
 from router import route
 from health import provider_health
@@ -235,6 +235,39 @@ async def _run_streaming(provider, model, api_key, messages, system_prompt, max_
     return result, (ttft_ms if ttft_ms is not None else latency_ms), started
 
 
+def _price_at(pid: str, tier: str, input_tokens: int, output_tokens: int,
+              cached_input_tokens: int) -> CostEstimate:
+    """Price one provider at the given token counts with the same cache-aware
+    formula routing uses (pricing.CostEstimate.compute)."""
+    provider = PROVIDERS[pid]
+    return CostEstimate.compute(
+        provider_id=pid, provider=provider, model=provider.models[tier], tier=tier,
+        input_tokens=input_tokens, output_tokens=output_tokens, user_keys={},
+        cached_input_tokens=cached_input_tokens,
+    )
+
+
+def _actual_savings(pool: list[str], used: CostEstimate, tier: str, input_tokens: int,
+                    output_tokens: int, cached_input_tokens: int) -> Optional[dict]:
+    """
+    Savings of the provider that actually answered, at the actual token counts.
+
+    Baseline: the most expensive provider in the eligible (keyed, not excluded)
+    pool, every member priced at the same actual token counts and cache split.
+    None when the pool has a single provider (nothing to compare against).
+    Never negative: the used provider is itself in the pool.
+    """
+    if len(pool) < 2:
+        return None
+    priced = [used if pid == used.provider_id else
+              _price_at(pid, tier, input_tokens, output_tokens, cached_input_tokens)
+              for pid in pool]
+    baseline = max(priced, key=lambda e: e.total_cost_usd)
+    savings = compute_savings(used, baseline)
+    savings["vs_provider_id"] = baseline.provider_id
+    return savings
+
+
 # ─── Tools ────────────────────────────────────────────────────────────────────
 
 def _stale_price_refusal() -> Optional[str]:
@@ -412,7 +445,10 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
 
     Returns:
         str: JSON with completion text, routing metadata, actual token usage,
-             actual cost, and savings vs. most expensive alternative.
+             actual cost (cache-aware), and savings of the provider that answered
+             vs. the most expensive eligible provider, priced at the actual token
+             counts (`savings.vs_provider_id` names it). `estimated_savings` is the
+             pre-flight figure for the routed winner.
     """
     refusal = _stale_price_refusal()
     if refusal:
@@ -481,22 +517,26 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
             used = est
             attempts.append({"provider_id": pid, "outcome": "success",
                              "streamed": bool(use_stream)})
+            # Actual cost and savings for the provider that answered, at the
+            # actual token counts, with the same cache-aware pricing as routing.
+            actual = _price_at(pid, params.tier, completion.input_tokens_used,
+                               completion.output_tokens_used, params.cached_input_tokens)
+            actual_savings = _actual_savings(
+                ranked, actual, params.tier, completion.input_tokens_used,
+                completion.output_tokens_used, params.cached_input_tokens)
             # Log the successful decision, attributed to the provider that worked.
-            success_cost = (
-                (completion.input_tokens_used / 1_000_000) * model.input_price_per_1m
-                + (completion.output_tokens_used / 1_000_000) * model.output_price_per_1m
-            )
             log_decision(
                 decision_dict={**decision.to_dict(),
                                "winner": {**decision.to_dict()["winner"],
                                           "provider_id": pid,
                                           "provider_name": provider.name,
-                                          "region": provider.region}},
+                                          "region": provider.region},
+                               "savings": actual_savings},
                 session=params.session,
                 actual_input_tokens=completion.input_tokens_used,
                 actual_output_tokens=completion.output_tokens_used,
                 actual_latency_ms=completion.latency_ms,
-                actual_cost_usd=success_cost,
+                actual_cost_usd=actual.total_cost_usd,
             )
             break
         except Exception as exc:
@@ -508,13 +548,17 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
                 "error_class": str(exc).split(":")[0][:60],
             })
             # Log this provider's failure (feeds S8 health), attributed to it.
+            # A failed attempt bills nothing and saves nothing: cost 0, saved 0,
+            # so spend and savings totals are not inflated by failover.
             log_decision(
                 decision_dict={**decision.to_dict(),
                                "winner": {"provider_id": pid,
                                           "provider_name": provider.name,
                                           "region": provider.region,
-                                          "total_cost_usd": est.total_cost_usd}},
+                                          "total_cost_usd": 0.0},
+                               "savings": {"saved_usd": 0.0}},
                 session=params.session,
+                actual_cost_usd=0.0,
                 error=str(exc),
             )
             if mid_stream:
@@ -531,14 +575,12 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         }, indent=2)
 
     model = PROVIDERS[used.provider_id].models[params.tier]
-    actual_input_cost = (completion.input_tokens_used / 1_000_000) * model.input_price_per_1m
-    actual_output_cost = (completion.output_tokens_used / 1_000_000) * model.output_price_per_1m
-    actual_total_cost = actual_input_cost + actual_output_cost
 
     # SP1d — waist interaction: publish the OBSERVED signal (metadata-only) to the
-    # shared price-history spine. This is the effective per-1M unit rate the real
-    # call was billed at — a validation/drift signal for the pricing side, NEVER a
-    # published price. Opt-in via ARBITRAGE_EMIT_OBSERVED to avoid overhead by
+    # shared price-history spine. The unit rates are the TABLE prices for the model
+    # that answered (prices.json), not a rate read from the provider's bill — so it
+    # records which model real traffic used at what listed price, NEVER a published
+    # price and not an independent measurement. Opt-in via ARBITRAGE_EMIT_OBSERVED to avoid overhead by
     # default. Carries only provider/model/tier/unit-price — no content, no keys.
     if os.getenv("ARBITRAGE_EMIT_OBSERVED", "").strip() in ("1", "true", "TRUE", "yes"):
         try:
@@ -568,8 +610,12 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         "cost": {
             "actual_input_tokens": completion.input_tokens_used,
             "actual_output_tokens": completion.output_tokens_used,
-            "actual_cost_usd": round(actual_total_cost, 8),
-            "savings": decision.savings,
+            "actual_cost_usd": actual.total_cost_usd,
+            "actual_cached_input_tokens": actual.cached_input_tokens,
+            # Savings of the provider that answered vs. the most expensive
+            # eligible provider, all priced at the actual token counts.
+            "savings": actual_savings,
+            "estimated_savings": decision.savings,
         },
         "latency_ms": completion.latency_ms,
         "excluded_providers": decision.excluded,
