@@ -21,6 +21,12 @@ env:
   HEALTH_WINDOW: "50"
   HEALTH_MIN_SAMPLES: "3"
   HEALTH_THRESHOLD: "0.5"
+  HEALTH_MAX_PER_SESSION: "5"       # ST5: most records one session adds to a provider's score
+  HEALTH_MIN_SESSIONS: "2"          # ST5: distinct failing sessions needed to mark unhealthy
+
+  # History reads (ST5) — "1" lets callers without a session read EVERY session's
+  # records and spend. Off by default: no session reads only the shared anon session.
+  ARBITRAGE_ALLOW_GLOBAL_READS: ""
 
   # Spend analytics (S1) — set both to persist across redeploys; else ephemeral JSONL
   # UPSTASH_REDIS_REST_URL: ""

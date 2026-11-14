@@ -39,10 +39,13 @@ Pick by how hard the task is, not by provider:
   providers have a key supplied. Nothing checks that a provider is reachable before
   routing; failover handles errors after the fact.
 - `arbitrage_provider_health` — recent success rate from the server's shared history,
-  used to deprioritize flaky providers.
+  used to deprioritize flaky providers. Only provider-side failures (429/5xx/timeouts)
+  count, never a caller's bad key or bad request, and one session can't sway it alone.
 - `arbitrage_spend_report` / `arbitrage_set_budget` / `arbitrage_get_history` —
   per-session spend analytics and budget alerts (alerts only; nothing is blocked).
-  Without `session`, history and spend reports cover every session.
+  You only see your own records: without `session`, history and spend reports cover
+  only the shared `anon` session, never other sessions' (an all-sessions view needs
+  the operator opt-in `ARBITRAGE_ALLOW_GLOBAL_READS=1`).
 - `arbitrage_check_price_drift` — compare table prices against a programmatic feed.
 
 **Price truth (the pricing head, provenance-first):**
