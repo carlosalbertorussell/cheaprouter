@@ -19,6 +19,7 @@ Deploy (MCPize):
   mcpize deploy                (no secrets needed — users supply keys per request)
 """
 
+import asyncio
 import json
 import sys
 import time
@@ -346,7 +347,8 @@ async def arbitrage_estimate_cost(params: EstimateCostInput) -> str:
     if refusal:
         return refusal
 
-    decision = route(
+    decision = await asyncio.to_thread(
+        route,
         providers=PROVIDERS,
         tier=params.tier,
         input_tokens=params.input_tokens,
@@ -409,7 +411,8 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
 
     estimated_input = count_message_tokens(params.messages, params.system_prompt)
 
-    decision = route(
+    decision = await asyncio.to_thread(
+        route,
         providers=PROVIDERS,
         tier=params.tier,
         input_tokens=estimated_input,
@@ -578,7 +581,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
 
     # Budget alert (S1.5): if the caller set a budget for this session, surface usage.
     if params.session:
-        status = budget_status(params.session)
+        status = await asyncio.to_thread(budget_status, params.session)
         if status:
             result["budget"] = status
             if status["over_budget"]:
@@ -682,14 +685,16 @@ async def arbitrage_get_history(params: GetHistoryInput) -> str:
         str: JSON with routing history or aggregate summary.
     """
     if params.summary_only:
-        return json.dumps(history_summary(params.limit, params.session), indent=2)
+        summary = await asyncio.to_thread(history_summary, params.limit, params.session)
+        return json.dumps(summary, indent=2)
 
-    records = read_history(params.limit, params.session)
+    records = await asyncio.to_thread(read_history, params.limit, params.session)
     if not records:
         return json.dumps({"message": "No routing history found.", "records": []})
 
     return json.dumps(
-        {"summary": history_summary(params.limit, params.session), "records": records},
+        {"summary": await asyncio.to_thread(history_summary, params.limit, params.session),
+         "records": records},
         indent=2,
     )
 
@@ -722,7 +727,8 @@ async def arbitrage_spend_report(params: SpendReportInput) -> str:
     Returns:
         str: JSON with spend_by_provider, spend_by_tier, spend_by_day, and totals.
     """
-    return json.dumps(spend_report(params.session, params.limit, params.since), indent=2)
+    report = await asyncio.to_thread(spend_report, params.session, params.limit, params.since)
+    return json.dumps(report, indent=2)
 
 
 @mcp.tool(
@@ -749,8 +755,8 @@ async def arbitrage_set_budget(params: SetBudgetInput) -> str:
     Returns:
         str: JSON confirming the stored budget, plus current status.
     """
-    stored = set_budget(params.session, params.monthly_usd)
-    status = budget_status(params.session)
+    stored = await asyncio.to_thread(set_budget, params.session, params.monthly_usd)
+    status = await asyncio.to_thread(budget_status, params.session)
     return json.dumps({"budget_set": stored, "current_status": status}, indent=2)
 
 
@@ -786,7 +792,7 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
              thresholds in effect.
     """
     from health import HEALTH_MIN_SAMPLES, HEALTH_THRESHOLD, HEALTH_WINDOW
-    snap = provider_health(limit=params.window)
+    snap = await asyncio.to_thread(provider_health, limit=params.window)
     unhealthy = [pid for pid, h in snap.items() if not h["healthy"]]
     return json.dumps({
         "providers": snap,

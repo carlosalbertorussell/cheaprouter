@@ -70,8 +70,10 @@ def test_override_downgrades_to_warning(fresh_env, stale_table, monkeypatch):
         tier="tier_fast", input_tokens=100, output_tokens=50, api_keys={"groq": "k"})
     out = json.loads(_run(server.arbitrage_estimate_cost(params)))
     # not a refusal — real estimate came back, tagged stale
-    assert "error" not in out or out.get("error") != "price_table_stale"
+    assert "error" not in out
+    assert out["winner"]["provider_id"] == "groq"
     assert out["price_table"]["stale"] is True
+    assert out["price_table"]["allow_stale_override"] is True
 
 
 def test_provider_status_returns_data_when_stale(fresh_env, stale_table, monkeypatch):
@@ -110,3 +112,34 @@ def _restore(monkeypatch):
     monkeypatch.delenv("ARBITRAGE_ALLOW_STALE_PRICES", raising=False)
     import importlib, pricing_table, providers, server
     importlib.reload(pricing_table); importlib.reload(providers); importlib.reload(server)
+
+
+def test_route_completion_override_proceeds_with_warning(fresh_env, stale_table, monkeypatch):
+    from client import CompletionResult
+    monkeypatch.setenv("ARBITRAGE_ALLOW_STALE_PRICES", "1")
+    server = _reload_server()
+    calls = []
+    async def fake_call(provider, model, api_key, messages, system_prompt, max_tokens):
+        calls.append(provider.name)
+        return CompletionResult(text="ok", input_tokens_used=1, output_tokens_used=1,
+                                latency_ms=1, model_id="m", raw_response={})
+    monkeypatch.setattr(server, "call_provider", fake_call)
+    params = server.RouteCompletionInput(
+        messages=[{"role": "user", "content": "hi"}], tier="tier_fast",
+        api_keys={"groq": "k"}, health_aware=False)
+    out = json.loads(_run(server.arbitrage_route_completion(params)))
+    assert out["response"] == "ok" and calls == ["Groq"]
+    assert out["price_table"]["stale"] is True
+    assert out["price_table"]["warning"].startswith("Prices are stale; routing proceeded")
+
+
+def test_stale_refusal_never_calls_a_provider(fresh_env, stale_table, monkeypatch):
+    monkeypatch.delenv("ARBITRAGE_ALLOW_STALE_PRICES", raising=False)
+    server = _reload_server()
+    async def must_not_call(*a, **kw):
+        raise AssertionError("provider called despite stale prices")
+    monkeypatch.setattr(server, "call_provider", must_not_call)
+    out = json.loads(_run(server.arbitrage_route_completion(server.RouteCompletionInput(
+        messages=[{"role": "user", "content": "hi"}], api_keys={"groq": "k"}))))
+    assert out["error"] == "price_table_stale"
+    assert "ARBITRAGE_ALLOW_STALE_PRICES=1" in out["message"]

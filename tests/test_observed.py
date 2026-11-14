@@ -97,10 +97,52 @@ def test_pricing_observed_tool(be):
 
 # ─── router emits observed only when opted in ─────────────────────────────────
 
-def test_router_emits_observed_only_when_enabled(tmp_path, monkeypatch):
-    # This is an integration-ish check that the env gate exists and defaults off.
-    import server
-    import os
-    # default: not set → the gate is off (we assert the code path is guarded)
-    monkeypatch.delenv("ARBITRAGE_EMIT_OBSERVED", raising=False)
-    assert os.getenv("ARBITRAGE_EMIT_OBSERVED", "").strip() not in ("1","true","TRUE","yes")
+@pytest.mark.parametrize("flag,expect_emit", [(None, False), ("0", False), ("1", True),
+                                               ("true", True), ("yes", True)])
+def test_router_emits_observed_only_when_enabled(route_env, be, monkeypatch, flag, expect_emit):
+    """Run a real route_completion and check whether an observed entry is written."""
+    from client import CompletionResult
+    if flag is None:
+        monkeypatch.delenv("ARBITRAGE_EMIT_OBSERVED", raising=False)
+    else:
+        monkeypatch.setenv("ARBITRAGE_EMIT_OBSERVED", flag)
+
+    async def fake_call(provider, model, api_key, messages, system_prompt, max_tokens):
+        return CompletionResult(text="ok", input_tokens_used=10, output_tokens_used=5,
+                                latency_ms=1, model_id="served-model", raw_response={})
+    s = route_env.server
+    monkeypatch.setattr(s, "call_provider", fake_call)
+    out = json.loads(_run(s.arbitrage_route_completion(s.RouteCompletionInput(
+        messages=[{"role": "user", "content": "hi"}], tier="tier_fast",
+        api_keys={"groq": "sk-test-FAKE"}, health_aware=False))))
+    assert out["response"] == "ok"                      # emit never affects the response
+    rows = be.read()
+    if not expect_emit:
+        assert rows == []
+        return
+    import providers
+    m = providers.PROVIDERS["groq"].models["tier_fast"]
+    assert {r["field"] for r in rows} == {"input_price_per_1m", "output_price_per_1m"}
+    assert all(r["provenance_tier"] == "observed" and r["provider"] == "groq" for r in rows)
+    assert all(r["model_id"] == "served-model" for r in rows)
+    by = {r["field"]: r["new"] for r in rows}
+    assert by == {"input_price_per_1m": m.input_price_per_1m,
+                  "output_price_per_1m": m.output_price_per_1m}
+
+
+def test_router_emit_failure_never_breaks_response(route_env, monkeypatch):
+    import price_history
+    from client import CompletionResult
+    monkeypatch.setenv("ARBITRAGE_EMIT_OBSERVED", "1")
+    def boom(**kw):
+        raise OSError("disk full")
+    monkeypatch.setattr(price_history, "record_observed", boom)
+    async def fake_call(provider, model, api_key, messages, system_prompt, max_tokens):
+        return CompletionResult(text="ok", input_tokens_used=1, output_tokens_used=1,
+                                latency_ms=1, model_id="m", raw_response={})
+    s = route_env.server
+    monkeypatch.setattr(s, "call_provider", fake_call)
+    out = json.loads(_run(s.arbitrage_route_completion(s.RouteCompletionInput(
+        messages=[{"role": "user", "content": "hi"}], api_keys={"groq": "sk-test-FAKE"},
+        health_aware=False))))
+    assert out["response"] == "ok"

@@ -115,10 +115,40 @@ def test_shipped_table_refresh_strategies():
         assert t["providers"][pid]["refresh"].get("ids")
 
 
-def test_format_report_runs():
+def test_format_report_runs(monkeypatch):
+    # No network: the shipped table's OpenRouter providers see an empty feed
+    # (every id missing → fetch_failed); json_api fetches would also get None.
+    urls = []
+    def fake_fetch(url):
+        urls.append(url)
+        return {"data": []}
+    monkeypatch.setattr(refresh, "_fetch_json", fake_fetch)
     rep = refresh.check_drift()
+    assert urls == [refresh.OPENROUTER_MODELS_URL]      # one shared fetch, stubbed
+    s = rep["summary"]
+    assert s["total"] == len(rep["providers"]) == 8
+    assert s["manual"] == 2 and s["fetch_failures"] == 6 and s["drifts"] == 0
+    assert rep["any_drift"] is False
     out = refresh.format_drift_report(rep)
-    assert "Price drift check" in out
+    assert out.startswith("Price drift check — ")
+    assert "matches: 0  drifts: 0  fetch-failed: 6  manual: 2  (of 8)" in out
+    for pid in ("groq", "qwen", "anthropic", "openai"):
+        assert pid in out
+    # no drift → no "review the proposed changes" footer
+    assert "Review the proposed changes" not in out
+
+
+def test_format_report_lists_drift_changes():
+    rep = {"checked_at": "2026-01-01T00:00:00+00:00",
+           "summary": {"matches": 0, "drifts": 1, "fetch_failures": 0, "manual": 0, "total": 1},
+           "providers": [{"provider_id": "apico", "strategy": "json_api", "status": "drift",
+                          "detail": "1 price(s) differ from the table.",
+                          "changes": [{"tier": "tier_fast", "field": "input_price_per_1m",
+                                       "old": 0.5, "new": 0.75}]}]}
+    out = refresh.format_drift_report(rep)
+    assert "≠ apico" in out
+    assert "tier_fast.input_price_per_1m: 0.5 → 0.75" in out
+    assert "Nothing was changed." in out
 
 
 # ─── OpenRouter shared feed (SC2) ─────────────────────────────────────────────
@@ -239,3 +269,37 @@ def test_index_openrouter():
     idx = _refresh_mod._index_openrouter(_or_feed())
     assert "openai/gpt-4o-mini" in idx
     assert idx["openai/gpt-4o-mini"]["prompt"] == "0.00000015"
+
+
+# ─── _fetch_json over a mocked transport (the real HTTP helper) ───────────────
+
+def test_fetch_json_success_and_headers(mock_http):
+    import httpx
+    http = mock_http(lambda req: httpx.Response(200, json={"data": [1]}))
+    assert refresh._fetch_json("https://feed.example/models") == {"data": [1]}
+    assert http.requests[0].headers["accept"] == "application/json"
+    assert http.requests[0].method == "GET"
+    assert http.timeouts == [refresh.FETCH_TIMEOUT]
+
+
+def test_fetch_json_follows_redirects(mock_http):
+    import httpx
+    def handler(req):
+        if req.url.path == "/old":
+            return httpx.Response(301, headers={"Location": "https://feed.example/new"})
+        return httpx.Response(200, json={"ok": True})
+    mock_http(handler)
+    assert refresh._fetch_json("https://feed.example/old") == {"ok": True}
+
+
+@pytest.mark.parametrize("kind", ["500", "not-json", "connect"])
+def test_fetch_json_failures_return_none(mock_http, kind):
+    import httpx
+    def handler(req):
+        if kind == "500":
+            return httpx.Response(500)
+        if kind == "not-json":
+            return httpx.Response(200, content=b"<html>")
+        raise httpx.ConnectError("down", request=req)
+    mock_http(handler)
+    assert refresh._fetch_json("https://feed.example/x") is None

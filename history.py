@@ -17,7 +17,7 @@ import hashlib
 from collections import defaultdict
 from typing import Optional
 
-from storage import get_backend, build_record
+from storage import build_record, read_records, write_record
 
 
 # ─── Session tokens ───────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ def log_decision(
         success=error is None,
         error=error,
     )
-    get_backend().write(record)
+    write_record(record)
 
 
 # ─── Reading ──────────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ def log_decision(
 def read_history(limit: int = 50, session: Optional[str] = None) -> list[dict]:
     """Recent records, newest first, scoped to a session when given."""
     scope = normalize_session(session) if session is not None else None
-    return get_backend().read(scope, limit)
+    return read_records(scope, limit)
 
 
 def history_summary(limit: int = 50, session: Optional[str] = None) -> dict:
@@ -174,31 +174,38 @@ def set_budget(session: Optional[str], monthly_usd: float) -> dict:
         cost_usd=float(monthly_usd), saved_usd=None,
         latency_ms=None, success=True,
     )
-    get_backend().write(rec)
+    write_record(rec)
     return {"session_scoped": True, "monthly_budget_usd": round(float(monthly_usd), 2)}
 
 
-def get_budget(session: Optional[str], limit: int = 500) -> Optional[float]:
-    """Most recent budget set for this session, or None."""
-    for r in read_history(limit, session):
+def _budget_from(records: list[dict]) -> Optional[float]:
+    """Most recent budget among records (newest first), or None."""
+    for r in records:
         if r.get("provider_id") == _BUDGET_MARKER:
             return r.get("cost_usd")
     return None
 
 
+def get_budget(session: Optional[str], limit: int = 500) -> Optional[float]:
+    """Most recent budget set for this session, or None."""
+    return _budget_from(read_history(limit, session))
+
+
 def budget_status(session: Optional[str], limit: int = 500) -> Optional[dict]:
     """
     Current month spend vs. budget for a session. None if no budget is set.
-    Real spend excludes budget-marker records.
+    Real spend excludes budget-marker records. One read serves both the budget
+    lookup and the spend sum.
     """
-    budget = get_budget(session, limit)
+    records = read_history(limit, session)
+    budget = _budget_from(records)
     if budget is None:
         return None
 
     from datetime import datetime, timezone
     month_prefix = datetime.now(timezone.utc).strftime("%Y-%m")
     spent = 0.0
-    for r in read_history(limit, session):
+    for r in records:
         if r.get("provider_id") == _BUDGET_MARKER:
             continue
         if (r.get("timestamp") or "").startswith(month_prefix):
