@@ -184,6 +184,16 @@ def test_shipped_table_staleness_at_fixed_dates(monkeypatch):
     assert st["stale"] is True and st["age_days"] == max_age + 1
 
 
+def test_shipped_table_expires_2026_12_29(monkeypatch):
+    # SC1e: all 8 providers re-read on 2026-11-14 (six in SC1e, Groq/Qwen in SC1d);
+    # with max_age_days 45 the table is fresh through 2026-12-29.
+    pt = _load_shipped(monkeypatch)
+    assert pt.VERIFIED_AT == date(2026, 11, 14)
+    assert pt.MAX_AGE_DAYS == 45
+    assert pt.is_stale(date(2026, 12, 29)) is False
+    assert pt.is_stale(date(2026, 12, 30)) is True
+
+
 def test_staleness_uses_monkeypatched_now(tmp_path, monkeypatch):
     """With no explicit `today`, is_stale()/age_days() read the UTC clock. Pin it."""
     from datetime import datetime as _dt, timezone as _tz

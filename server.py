@@ -68,7 +68,7 @@ mcp = FastMCP(
 
 TIER_DESC = "Capability tier: 'tier_fast' (cheap/fast), 'tier_balanced' (mid-range), 'tier_powerful' (flagship)"
 
-CACHE_DESC = "Of input_tokens, how many are expected to be cache hits. Models with a cache-read price in prices.json (Anthropic, Gemini, Mistral, DeepSeek, Grok, and qwen-max) bill these far cheaper, which can change which provider is cheapest. Models without one (currently OpenAI, Groq, qwen-flash, qwen-plus) bill them at the full input rate. Default 0."
+CACHE_DESC = "Of input_tokens, how many are expected to be cache hits. Models with a cache-read price in prices.json (Anthropic, OpenAI, Gemini, Groq, Mistral, DeepSeek, Grok, and qwen-max) bill these far cheaper, which can change which provider is cheapest. Models without one (currently qwen-flash and qwen-plus) bill them at the full input rate. Default 0."
 
 API_KEYS_DESC = (
     "Your provider API keys as a dict. Supply only the providers you want eligible. "

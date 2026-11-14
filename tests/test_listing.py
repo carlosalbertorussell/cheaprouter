@@ -58,7 +58,7 @@ def test_carried_providers_from_notes(gen, table):
     t = copy.deepcopy(table)
     t["notes"]["groq_lifecycle"] = "CARRIED, NOT RE-READ: test"
     assert gen.carried_providers(t) == ["groq"]
-    assert "**Carried, not re-read on 2026-11-01:** Groq." in gen.render(t)
+    assert "**Carried, not re-read on 2026-11-14:** Groq." in gen.render(t)
     assert "| Groq | fast | openai/gpt-oss-20b | 0.075 | 0.30 | 0.037 | carried, not re-read |" \
         in gen.render(t)
 
