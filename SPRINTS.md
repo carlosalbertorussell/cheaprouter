@@ -7,6 +7,73 @@ One task per unit, PARTIAL-honest over DONE-false, closures noted inline.
 
 ## Active
 
+### ST4 — Hosted key safety, savings maths and docs accuracy
+
+**Goal:** a hosted server must never spend its operator's provider keys; the cost
+and savings numbers must describe what actually happened; and the docs must say
+what the code does. A docs review, checked against the code, found all three.
+
+**Delivered on this branch:**
+- **Hosted key safety.** `providers.resolve_api_key` fell back to provider env vars
+  (`ANTHROPIC_API_KEY`, ...) whenever a caller omitted a key, so any anonymous
+  caller of a hosted server could route completions billed to the operator, and
+  `.env.example` told operators to store those keys as MCPize secrets. Rule now:
+  caller keys always win; the env fallback applies only over stdio
+  (`server.main` marks the process local before `mcp.run(transport="stdio")`) or
+  with the explicit opt-in `ARBITRAGE_ALLOW_ENV_KEYS=1`. Never by default over
+  HTTP. Every key path (route, stream, estimate, provider status, pricing table)
+  goes through this one function. `.env.example` (also renamed from the old
+  project name), `mcpize.yaml` and `SECURITY.md` document it.
+- **Savings and actual-cost maths.** Response `savings` was the pre-flight estimate
+  for the routed winner even after failover, actual cost ignored the cache-read
+  discount routing had used, and failed attempts were logged with the estimated
+  cost and the decision's savings (inflating spend and saved totals). Now actual
+  cost uses `pricing.CostEstimate.compute` (the routing formula, cache split
+  capped at the actual input); `savings` compares the provider that answered with
+  the most expensive eligible provider, all priced at the actual token counts
+  (`savings.vs_provider_id` names the baseline; `estimated_savings` keeps the
+  pre-flight figure); failed attempts log cost 0 and saved 0. Same response keys,
+  corrected values, two added fields. `history.py` untouched.
+- **MCPize listing regenerated.** `scripts/gen_listing.py` writes the pricing block
+  of `MCPIZE_LISTING.md` from `prices.json` (2026-11-01), marks Groq and Qwen as
+  carried, not re-read, and computes the per-tier winners with `route()`.
+  `tests/test_listing.py` fails if the listing drifts. "Semantically equivalent" /
+  "clears the tier" claims removed.
+- **Docs sweep** (README, ARCHITECTURE, MCPIZE_DOCS, CONNECT, CONTRIBUTING, SECURITY,
+  SKILL.md, mcpize.yaml, PIPELINE.md): all 10 router tools with parameters and
+  defaults plus the 5 `pricing_*` tools; port 8081; endpoint `/mcp`; Claude.ai
+  "Connectors"; prices.json + staleness guard; history durable with Upstash, JSONL
+  fallback; cache providers per prices.json; computed tier winners (fast: Groq
+  llama-3.1-8b-instant, balanced: DeepSeek deepseek-flash, powerful: Groq
+  llama-3.3-70b-versatile, at 1,000/500 tokens with every key); unhealthy behind
+  *all* healthy providers; health is global; unscoped history/spend reads return
+  every session's records; budgets alert, never enforce; one o200k encoder;
+  `pricing_observed` described as the table-price signal it is. PIPELINE.md
+  marked superseded.
+
+**Tests:** `tests/test_key_safety.py` (HTTP mode with env keys and no caller keys:
+no eligible providers and no request, streaming included; estimate, status and
+pricing ignore env keys; opt-in and stdio `main()` enable the fallback; caller
+keys win), new hand-computed cases in `tests/test_route_completion.py` (savings at
+actual tokens, failover to the baseline and to a middle provider, cache-aware
+actual cost and baseline, cache clamp, zero-cost failure logging in summary and
+spend report), `tests/test_listing.py`. 371 tests pass (random order, 10 runs);
+coverage 96.6%.
+
+**PARTIAL / deferred:**
+- **Unscoped reads are not scoped by default.** `arbitrage_get_history` and
+  `arbitrage_spend_report` without `session` still return every session's records
+  (as hashes). Docs now say so; making them scoped by default is a follow-up.
+- **Health is global, not per user.** Any caller's failures, including bad-key
+  401s, deprioritize a provider for everyone. Per-user (or per-key-hash) health
+  is a follow-up.
+- **Groq and Qwen prices are still carried, not re-read.** They need a priced
+  source (console.groq.com; a priced Model Studio page).
+- **Business decisions CR-06 (Pro price / free-Pro boundary) and CR-03
+  (liability for "certified")** are the owner's; PRICING_STRATEGY.md,
+  TICKER_VISION.md and PRICING_SERVER_BLUEPRINT.md were not touched.
+- **Client one-pager** not written.
+
 ### ST2 — Upstash history off the routing path
 
 **Goal:** a slow or unreachable Upstash must never slow routing down. Before

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **ST4 — hosted servers no longer use operator env keys.** Over HTTP (the default transport, and MCPize) the router now uses only the keys a caller passes in `api_keys`; provider key env vars (`ANTHROPIC_API_KEY`, ...) are ignored. Before, a caller who omitted a key was silently routed on the operator's key. The env fallback still works over stdio (`python server.py --stdio`) and with the explicit opt-in `ARBITRAGE_ALLOW_ENV_KEYS=1`. Caller keys always win. **If you relied on server-side keys over HTTP, pass them in `api_keys` or set the opt-in on a private deployment.** `.env.example` no longer advises storing provider keys as MCPize secrets.
+
+### Fixed
+- **ST4 — savings and actual cost are corrected.** `cost.actual_cost_usd` now applies the cache-read rate to `cached_input_tokens`, using the same formula routing uses. `cost.savings` now describes the provider that actually answered (after any failover) against the most expensive eligible provider, both at the actual token counts; it was the pre-flight estimate for the routed winner. New fields: `cost.savings.vs_provider_id` (the baseline), `cost.estimated_savings` (the old pre-flight figure) and `cost.actual_cached_input_tokens`. Failed attempts are now logged with cost 0 and saved 0, so history, spend report and budget totals no longer count them. **Spend and savings numbers will differ from earlier releases for the same traffic.**
+
+### Changed
+- **ST4 — docs accuracy.** `MCPIZE_LISTING.md` pricing is now generated from `prices.json` by `scripts/gen_listing.py` (a test fails on drift); README, ARCHITECTURE, MCPIZE_DOCS, CONNECT, CONTRIBUTING, SECURITY, SKILL.md and mcpize.yaml corrected against the code (all 10 router tools and 5 pricing tools, port 8081, `/mcp`, cache providers, computed tier winners, shared health, unscoped reads, budgets as alerts). PIPELINE.md marked superseded by SPRINTS.md.
+
 ### Changed
 - **ST2 — Upstash history no longer slows routing.** Each history write is one `/pipeline` request (was three), made on a background writer thread instead of inline on the event loop. Upstash timeout is now `UPSTASH_TIMEOUT_S` (default 2s, was 10s). A new capped `history:recent` list makes health scoring one request instead of one per session ever seen. `budget_status` reads once. `route()`, budget and history calls in the server run via `asyncio.to_thread`. Reads wait briefly for this process's pending writes, so read-after-write still holds. JSONL self-hosting is unchanged.
 
