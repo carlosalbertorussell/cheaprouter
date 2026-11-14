@@ -7,6 +7,69 @@ One task per unit, PARTIAL-honest over DONE-false, closures noted inline.
 
 ## Active
 
+### SC1e — Full price re-check (2026-11-14)
+
+**Goal:** re-read every provider before the table expired on 2026-12-16 and move
+`verified_at` forward. Research reports read each provider's official page (no
+OpenRouter or aggregator numbers); the owner then checked every price against the
+provider pages on 2026-11-14 and all of them matched.
+
+**Re-read (all 8):** Anthropic, OpenAI, Gemini, Mistral, DeepSeek and Grok in SC1e;
+Groq and Qwen were already checked by the owner the same day in SC1d.
+
+**What changed in `prices.json`:**
+- **Prices:** no input or output price changed on any row.
+- **OpenAI cache-read now modelled** (developers.openai.com/api/docs/pricing):
+  gpt-6-luna 0.01, gpt-6.1-terra 0.05, gpt-6.1-sol 0.10. Cache-write (30m/12h
+  surcharges) is not modelled, same as Anthropic.
+- **Context windows:** Claude 5.5 Haiku/Sonnet/Opus 200000 → 1000000; gpt-6-luna and
+  gpt-6.1-terra 128000 → 1050000, gpt-6.1-sol 200000 → 1050000;
+  `mistral-small-latest` 32000 → 256000 (page says "256k"; 256000 is the conservative
+  reading); `mistral-large-latest` 128000 → 1000000; grok-4.3 131072 → 1000000.
+  grok-4.7 (500000) and Gemini (1048576) already matched. `context_window` is only
+  displayed (`server.py`, `pricing_server.py`), never used for eligibility, so the
+  larger windows change no routing.
+- **Links:** `pricing_urls` for Anthropic (platform.claude.com/docs/en/about-claude/pricing),
+  OpenAI (developers.openai.com/api/docs/pricing), Gemini (aistudio.google.com/docs/pricing)
+  and Mistral (docs.mistral.ai/inference/pricing) now point at priced pages. DeepSeek
+  and Grok kept.
+- **Notes:** `openai_lifecycle` (cache published, context re-read, gpt-5.6-sol promo
+  ends 2026-11-30, not ~11-21); `long_context` (only Haiku 5.5 has a price step, at
+  100K; Sonnet/Opus 5.5 bill the full 1M at standard rates); `caching` (OpenAI and
+  Groq modelled; only qwen-flash/qwen-plus left); new `mistral` (aliases:
+  `mistral-small-latest` = mistral-small-2603 / Small 4, `mistral-large-latest` =
+  Large 4) and `gemini` (promos and Hydrogen) notes; `deepseek` (deepseek-flash now
+  V4.1-Flash-1017 at the same price; peak window excludes Chinese public holidays).
+- **Provenance:** `verified_at` 2026-11-01 → 2026-11-14; `verified_by` gained an SC1e
+  sentence at the start, prior history kept. `price_history.jsonl` not written:
+  SC1c and SC1d did not call `record_diff` either (capture is wired at SC8), and no
+  price moved.
+
+**Owner decisions (2026-11-14):**
+- **A — model OpenAI's cache-read rates: yes.** Done above.
+- **B — Gemini powerful → gemini-4-hydrogen (1.50/7.50/0.075): no.** It looks
+  Flash-class and its name is unconfirmed outside Google's docs. Revisit with S7.
+- **C — Mistral fast → Ministral 3 3B/8B: no.** Much smaller models than Small 4;
+  needs S7 capability scoring first.
+
+**Promos not adopted:** gemini-4-argon and gemini-4-carbon (2/10 through 2026-11-30,
+then 4/20); gemini-3.8-flash and gemini-3.6-flash (0.75/3.75 through 2026-12-31);
+gpt-5.6-sol (through 2026-11-30).
+
+**Downstream:** MCPIZE_LISTING.md regenerated (OpenAI cache column). Tier winners
+(`route()`, every key, 1000/500, ST6 tie-break) unchanged: fast Groq gpt-oss-20b,
+balanced Groq gpt-oss-120b, powerful Groq gpt-oss-120b. A grid of volumes and cache
+ratios, with and without `latency_sensitive`, gave no winner change from OpenAI
+caching: gpt-6-luna now ties claude-haiku-5-5 exactly on every fast request
+(0.10/0.50/0.01) and the tie-break (equal latency, then `provider_id`) keeps Anthropic
+first. README, MCPIZE_DOCS and the `cached_input_tokens` tool description no longer
+say OpenAI cache is unmodelled. Tests: no-cache examples moved from OpenAI to
+qwen-flash; new pins for OpenAI cache rates, context windows, the luna/haiku tie and
+the 2026-12-29 expiry.
+
+**Expiry: 2026-12-29.** Re-check before then. The way out of this manual 45-day
+chore is SC7 (scheduled drift check / auto-refresh), with SC8 as the agent on top.
+
 ### ST6 — Retired-model failover and deterministic routing
 
 **Goal:** degrade gracefully the next time a provider retires a model (SC1d had
@@ -577,13 +640,9 @@ the two forces that fight each other; this sequence resolves them.
   keeps it current automatically. Depends on SC2. Deliberately NOT about adding
   new providers — that's separate and mostly stays deferred (see below). **KPI-coverage driver (2026-09, see PRICING_STRATEGY.md):** if the pricing data is positioned as financial-KPI intelligence, SC3's target list explicitly adds the financially-material players — major labs' full lineups and the cloud gateways (Azure OpenAI / AWS Bedrock / Google Vertex, in scope here as KPI-coverage targets even though deferred as routing targets) — because a KPI series that omits them is incomplete as market intelligence. Rationale shifts from 'more arbitrage' to 'citable coverage'; timing unchanged (still behind SC2).
 
-- **SC1c — Catalog-wide "cheapest current" pass (deferred from SC1b, 2026-10-12).**
-  SC1b only fixed the broken rows. Cheaper current models exist that the table
-  does not use: Anthropic Sonnet 5.5 ($2/$10/$0.10 vs Sonnet 4.6 $3/$15/$0.30),
-  Haiku 5.5, Opus 5.5 ($4/$20/$0.20); Gemini 3.6 / 3.8 Flash; xAI grok-4.7; Mistral
-  Large 4 (public preview, `mistral-large-4`). Gemini and Grok tier_fast now
-  duplicate tier_balanced by decision — a distinct fast model for each is part of
-  this pass. Each model swap is Carlos's call.
+- ~~**SC1c — Catalog-wide "cheapest current" pass (deferred from SC1b, 2026-10-12).**~~
+  **Done 2026-11-01** — see "SC1c — Catalog-wide sweep + OpenAI migration" under
+  Closed (Anthropic 5.5, OpenAI GPT-6, Mistral Large 4, grok-4.7 adopted).
 - **OpenAI migration (urgent-ish, deferred from SC1b).** gpt-4o-mini, gpt-4o and o3
   were kept and priced from their model pages, but OpenAI dropped them from its
   pricing table, marks o3 Deprecated (succeeded by GPT-5), and shuts down snapshots

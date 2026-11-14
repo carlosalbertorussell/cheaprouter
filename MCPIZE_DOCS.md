@@ -462,7 +462,7 @@ Providers are selected using the following priority order:
 5. **Health** — when `health_aware: true` (default), providers whose recent success rate is at or below half are deprioritized: moved behind *all* healthy providers, whatever their price. They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. Health is scored on global history shared across users, counting only provider-side failures (never a caller's bad key or bad request), capping each session's contribution and needing failures from at least two sessions (one on a local stdio server). `route_completion` reports any `deprioritized_providers` in its response.
 6. **Failover** — if the chosen provider returns a transient error or reports the model retired or unavailable, routing walks down the ranked pool to the next provider automatically (up to `max_failover`). This uses the same ordering health produces, so failover prefers healthy providers first.
 
-**Prompt caching:** pass `cached_input_tokens` to price cache-hit input at each model's cache-read rate. `prices.json` models cache-read rates for Anthropic, Gemini, Groq, Mistral, DeepSeek, Grok and qwen-max, so on cache-heavy requests the cheapest provider can differ from the headline input-price ranking. OpenAI's cache rates are not published on its current pricing page and are omitted; OpenAI, qwen-flash and qwen-plus bill cached tokens at the full input rate, so they're never wrongly favoured.
+**Prompt caching:** pass `cached_input_tokens` to price cache-hit input at each model's cache-read rate. `prices.json` models cache-read rates for Anthropic, OpenAI, Gemini, Groq, Mistral, DeepSeek, Grok and qwen-max, so on cache-heavy requests the cheapest provider can differ from the headline input-price ranking. Only the cache-read rate is modelled, not cache-write surcharges. qwen-flash and qwen-plus bill cached tokens at the full input rate, so they're never wrongly favoured.
 
 ---
 
@@ -485,18 +485,18 @@ Token prices live in `prices.json` with provenance: a `verified_at` date and a
 To refresh prices: verify current rates against the provider pages below, update
 the numbers in `prices.json`, and set `verified_at` to today's date.
 
-- Anthropic: anthropic.com/pricing
-- OpenAI: openai.com/pricing
-- Google Gemini: ai.google.dev/pricing
+- Anthropic: platform.claude.com/docs/en/about-claude/pricing
+- OpenAI: developers.openai.com/api/docs/pricing
+- Google Gemini: aistudio.google.com/docs/pricing
 - Groq: console.groq.com/docs/models
-- Mistral: mistral.ai/technology
+- Mistral: docs.mistral.ai/inference/pricing
 - DeepSeek: api-docs.deepseek.com/quick_start/pricing
 - Alibaba Qwen: alibabacloud.com/help/en/model-studio/model-pricing
 - xAI Grok: docs.x.ai/docs/models
 
-These are the `pricing_urls` in `prices.json`. Groq and Qwen were re-read on
-2026-11-14 (SC1d); the other six providers were last re-read on 2026-11-01, the
-table's `verified_at`.
+These are the `pricing_urls` in `prices.json`. All eight providers were re-read
+on 2026-11-14, the table's `verified_at`: six in SC1e and Groq and Qwen in SC1d.
+The table expires on 2026-12-29.
 
 ---
 
@@ -524,7 +524,9 @@ no cache, at 1,000 input / 500 output tokens the shipped table routes `tier_fast
 Groq openai/gpt-oss-20b, `tier_balanced` to Groq openai/gpt-oss-120b, and
 `tier_powerful` to Groq openai/gpt-oss-120b. `tier_balanced` is an exact cost tie with DeepSeek deepseek-flash (both 0.15/0.60). Exact cost ties break on latency (lower first), then `provider_id`, never on the order of `prices.json`, so Groq (us, ~180ms) wins over DeepSeek (cn, ~390ms). With `latency_sensitive: true`
 DeepSeek and Qwen drop out and Groq wins all three tiers. Cache-heavy requests can
-favour DeepSeek or Anthropic. Run `arbitrage_estimate_cost` for your own volumes.
+favour DeepSeek or Anthropic. OpenAI gpt-6-luna ties Anthropic claude-haiku-5-5
+exactly on every `tier_fast` request (both 0.10/0.50, cache 0.01), which matters on
+cache-heavy requests where the pair can come first; the tie-break picks Anthropic. Run `arbitrage_estimate_cost` for your own volumes.
 
 **What does `latency_sensitive` actually do?**
 It excludes providers whose estimated round-trip latency exceeds 300ms. From
