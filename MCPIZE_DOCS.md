@@ -63,9 +63,9 @@ in the tier you ask for, so choose the tier your task needs and use
 
 | Tier | Best for | Example models |
 |------|----------|----------------|
-| `tier_fast` | Simple tasks, high volume, cost-sensitive | Haiku 5.5, GPT-6 Luna, Gemini 3.1 Flash-Lite, Llama 3.1 8B, Qwen Flash, DeepSeek Flash, Grok 4.3 |
-| `tier_balanced` | Most everyday tasks | Sonnet 5.5, GPT-6.1 Terra, Gemini 3.1 Flash-Lite, Llama 3.3 70B, Mistral Large 4, Qwen Plus, DeepSeek Flash, Grok 4.3 |
-| `tier_powerful` | Complex reasoning, long context | Opus 5.5, GPT-6.1 Sol, Gemini 3.1 Pro (preview), Llama 3.3 70B, Mistral Large 4, DeepSeek V4 Pro, Qwen Max, Grok 4.7 |
+| `tier_fast` | Simple tasks, high volume, cost-sensitive | Haiku 5.5, GPT-6 Luna, Gemini 3.1 Flash-Lite, GPT-OSS 20B (Groq), Qwen Flash, DeepSeek Flash, Grok 4.3 |
+| `tier_balanced` | Most everyday tasks | Sonnet 5.5, GPT-6.1 Terra, Gemini 3.1 Flash-Lite, GPT-OSS 120B (Groq), Mistral Large 4, Qwen Plus, DeepSeek Flash, Grok 4.3 |
+| `tier_powerful` | Complex reasoning, long context | Opus 5.5, GPT-6.1 Sol, Gemini 3.1 Pro (preview), GPT-OSS 120B (Groq), Mistral Large 4, DeepSeek V4 Pro, Qwen Max, Grok 4.7 |
 
 The fast tier also includes Mistral Small. Exact model IDs and prices are in
 `prices.json` and returned by `arbitrage_provider_status`.
@@ -166,7 +166,7 @@ core tool — it selects the winner and makes the actual API call on your behalf
 | `estimated_output_tokens` | integer | — | 500 | Used for pre-flight cost routing |
 | `health_aware` | boolean | — | `true` | Deprioritize providers with recent provider-side failures (never excludes) |
 | `max_failover` | integer | — | 2 | On a transient error (429/5xx/timeout), how many further providers to try in ranked order. 0 disables. |
-| `cached_input_tokens` | integer | — | 0 | Of the input tokens, how many are expected cache hits. Priced at each model's cache-read rate where `prices.json` has one (Anthropic, Gemini, Mistral, DeepSeek, Grok, qwen-max), which can change the cheapest choice. |
+| `cached_input_tokens` | integer | — | 0 | Of the input tokens, how many are expected cache hits. Priced at each model's cache-read rate where `prices.json` has one (Anthropic, Gemini, Groq, Mistral, DeepSeek, Grok, qwen-max), which can change the cheapest choice. |
 | `stream` | boolean | — | `false` | Consume the provider's streaming endpoint. Lowers time-to-first-token (reported as `time_to_first_token_ms`); the full text still returns as one result. Failover applies only before the first token. Anthropic and OpenAI-compatible providers only; Gemini falls back to a normal call. |
 | `session` | string | — | `null` | Opaque token to attribute spend to (see Sessions below). Required for budget alerts |
 
@@ -449,7 +449,7 @@ Providers are selected using the following priority order:
 5. **Health** — when `health_aware: true` (default), providers whose recent success rate is at or below half are deprioritized: moved behind *all* healthy providers, whatever their price. They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. Health is scored on global history shared across users, counting only provider-side failures (never a caller's bad key or bad request), capping each session's contribution and needing failures from at least two sessions. `route_completion` reports any `deprioritized_providers` in its response.
 6. **Failover** — if the chosen provider returns a transient error, routing walks down the ranked pool to the next provider automatically (up to `max_failover`). This uses the same ordering health produces, so failover prefers healthy providers first.
 
-**Prompt caching:** pass `cached_input_tokens` to price cache-hit input at each model's cache-read rate. `prices.json` models cache-read rates for Anthropic, Gemini, Mistral, DeepSeek, Grok and qwen-max, so on cache-heavy requests the cheapest provider can differ from the headline input-price ranking. OpenAI's cache rates are not published on its current pricing page and are omitted; OpenAI, Groq, qwen-flash and qwen-plus bill cached tokens at the full input rate, so they're never wrongly favoured.
+**Prompt caching:** pass `cached_input_tokens` to price cache-hit input at each model's cache-read rate. `prices.json` models cache-read rates for Anthropic, Gemini, Groq, Mistral, DeepSeek, Grok and qwen-max, so on cache-heavy requests the cheapest provider can differ from the headline input-price ranking. OpenAI's cache rates are not published on its current pricing page and are omitted; OpenAI, qwen-flash and qwen-plus bill cached tokens at the full input rate, so they're never wrongly favoured.
 
 ---
 
@@ -475,15 +475,15 @@ the numbers in `prices.json`, and set `verified_at` to today's date.
 - Anthropic: anthropic.com/pricing
 - OpenAI: openai.com/pricing
 - Google Gemini: ai.google.dev/pricing
-- Groq: groq.com/pricing
+- Groq: console.groq.com/docs/models
 - Mistral: mistral.ai/technology
 - DeepSeek: api-docs.deepseek.com/quick_start/pricing
-- Alibaba Qwen: alibabacloud.com/help/en/model-studio/models
+- Alibaba Qwen: alibabacloud.com/help/en/model-studio/model-pricing
 - xAI Grok: docs.x.ai/docs/models
 
-These are the `pricing_urls` in `prices.json`. Groq and Qwen were carried, not
-re-read, at the 2026-11-01 verification (no priced page could be read); treat
-them as unverified until the next sweep.
+These are the `pricing_urls` in `prices.json`. Groq and Qwen were re-read on
+2026-11-14 (SC1d); the other six providers were last re-read on 2026-11-01, the
+table's `verified_at`.
 
 ---
 
@@ -508,8 +508,8 @@ excluded from routing. Start with one or two and add more as you get accounts.
 **Which providers give the best savings?**
 It depends on the tier and your keys. With every key supplied, no constraints and
 no cache, at 1,000 input / 500 output tokens the shipped table routes `tier_fast` to
-Groq llama-3.1-8b-instant, `tier_balanced` to DeepSeek deepseek-flash, and
-`tier_powerful` to Groq llama-3.3-70b-versatile. With `latency_sensitive: true`
+Groq openai/gpt-oss-20b, `tier_balanced` to Groq openai/gpt-oss-120b, and
+`tier_powerful` to Groq openai/gpt-oss-120b. `tier_balanced` is an exact tie with DeepSeek deepseek-flash (both 0.15/0.60); the sort is stable, so the provider listed first in `prices.json` (Groq) wins. With `latency_sensitive: true`
 DeepSeek and Qwen drop out and Groq wins all three tiers. Cache-heavy requests can
 favour DeepSeek or Anthropic. Run `arbitrage_estimate_cost` for your own volumes.
 

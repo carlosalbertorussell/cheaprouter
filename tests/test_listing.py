@@ -48,22 +48,28 @@ def test_a_price_change_is_detected(gen, table):
     t = copy.deepcopy(table)
     t["providers"]["groq"]["models"]["tier_fast"]["input_price_per_1m"] = 0.06
     assert gen.render(t) != gen.render(table)
-    assert "| llama-3.1-8b-instant | 0.06 |" in gen.render(t)
+    assert "| openai/gpt-oss-20b | 0.06 |" in gen.render(t)
 
 
 def test_carried_providers_from_notes(gen, table):
-    assert gen.carried_providers(table) == ["groq", "qwen"]
+    # SC1d re-read Groq and Qwen, so nothing in the shipped table is carried.
+    assert gen.carried_providers(table) == []
+    assert "Carried, not re-read on" not in gen.render(table)
     t = copy.deepcopy(table)
-    t["notes"] = {}
-    assert gen.carried_providers(t) == []
-    assert "Carried, not re-read on" not in gen.render(t)
+    t["notes"]["groq_lifecycle"] = "CARRIED, NOT RE-READ: test"
+    assert gen.carried_providers(t) == ["groq"]
+    assert "**Carried, not re-read on 2026-11-01:** Groq." in gen.render(t)
+    assert "| Groq | fast | openai/gpt-oss-20b | 0.075 | 0.30 | 0.037 | carried, not re-read |" \
+        in gen.render(t)
 
 
 def test_tier_winners_are_computed(gen, table):
     w = gen.tier_winners(table)
-    assert w == {"tier_fast": "Groq llama-3.1-8b-instant",
-                 "tier_balanced": "DeepSeek deepseek-flash",
-                 "tier_powerful": "Groq llama-3.3-70b-versatile"}
+    # tier_balanced is an exact cost tie (Groq gpt-oss-120b and DeepSeek
+    # deepseek-flash are both 0.15/0.60); the stable sort keeps prices.json order.
+    assert w == {"tier_fast": "Groq openai/gpt-oss-20b",
+                 "tier_balanced": "Groq openai/gpt-oss-120b",
+                 "tier_powerful": "Groq openai/gpt-oss-120b"}
 
 
 def test_format_prices(gen):
@@ -74,6 +80,7 @@ def test_format_prices(gen):
 def test_listing_drops_retired_models_and_unsupported_claims():
     text = (ROOT / "MCPIZE_LISTING.md").read_text()
     for gone in ("claude-haiku-4-5", "gpt-4o", "| o3 |", "deepseek-v4-flash", "grok-4.6",
+                 "llama-3.1-8b-instant", "llama-3.3-70b-versatile", "carried, not re-read",
                  "verified 2026-10-12", "semantically equivalent", "clears the tier",
                  "clears\n> the task"):
         assert gone not in text, gone

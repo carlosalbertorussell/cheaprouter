@@ -42,7 +42,7 @@ The MCP endpoint (streamable HTTP) is `https://cheaprouter.mcpize.run/mcp`.
 | Anthropic | US | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 |
 | OpenAI | US | gpt-6-luna | gpt-6.1-terra | gpt-6.1-sol |
 | Google Gemini | US | gemini-3.1-flash-lite | gemini-3.1-flash-lite | gemini-3.1-pro-preview |
-| Groq | US | llama-3.1-8b-instant | llama-3.3-70b-versatile | llama-3.3-70b-versatile |
+| Groq | US | openai/gpt-oss-20b | openai/gpt-oss-120b | openai/gpt-oss-120b |
 | Mistral AI | EU | mistral-small-latest | mistral-large-latest | mistral-large-latest |
 | DeepSeek | CN | deepseek-flash | deepseek-flash | deepseek-v4-pro |
 | Alibaba Qwen | CN | qwen-flash | qwen-plus | qwen-max |
@@ -210,8 +210,9 @@ Health is scored on the server's global history, shared across every user,
 
 A tier is a price bucket of comparable models, not a guarantee they are equal.
 With every key supplied, no constraints and no cache, routing on the shipped table
-picks Groq llama-3.1-8b-instant (fast), DeepSeek deepseek-flash (balanced) and Groq
-llama-3.3-70b-versatile (powerful) at 1,000 input / 500 output tokens.
+picks Groq openai/gpt-oss-20b (fast), Groq openai/gpt-oss-120b (balanced) and Groq
+openai/gpt-oss-120b (powerful) at 1,000 input / 500 output tokens.
+`tier_balanced` is an exact tie with DeepSeek deepseek-flash (both 0.15/0.60); the sort is stable, so the provider listed first in `prices.json` (Groq) wins.
 
 Budgets (`arbitrage_set_budget`) are alerts at 80% and 100%; they never block a
 request.
@@ -225,13 +226,13 @@ the prices (`ARBITRAGE_ALLOW_STALE_PRICES=1` downgrades the refusal to a warning
 `python scripts/check_prices.py` reports the age; `arbitrage_check_price_drift`
 compares fetchable prices against the table but never edits it.
 
-Prompt caching: `prices.json` models a cache-read rate for Anthropic, Gemini,
+Prompt caching: `prices.json` models a cache-read rate for Anthropic, Gemini, Groq,
 Mistral, DeepSeek, Grok and qwen-max. OpenAI's cache rates are not published on its
-current pricing page, so they are omitted; OpenAI, Groq, qwen-flash and qwen-plus
-bill `cached_input_tokens` at the full input rate.
+current pricing page, so they are omitted; OpenAI, qwen-flash and qwen-plus bill
+`cached_input_tokens` at the full input rate.
 
-Groq and Qwen prices were carried from the previous sweep, not re-read on
-2026-11-01 (see `prices.json` notes). The pricing pages each provider is checked
+Groq and Qwen were re-read on 2026-11-14 (SC1d); the other six providers were
+last re-read on 2026-11-01, the table's `verified_at` (see `prices.json` notes). The pricing pages each provider is checked
 against are listed in `prices.json` under `pricing_urls`.
 
 ## Project structure
