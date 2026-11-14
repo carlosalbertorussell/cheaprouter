@@ -90,7 +90,8 @@ autouse fixture starting every test as HTTP with no override. 515 tests pass
   first tries the retired provider (one extra round trip) and fails over. A
   short-lived, server-side "skip this model" memory would need its own
   abuse analysis (same caller-triggerable problem as health), so not done.
-- Qwen region-bound keys (SC1d follow-up) still open; CONNECT.md unchanged.
+- Qwen region-bound keys (SC1d follow-up): documented. CONNECT.md now asks for a
+  Singapore-region key (commit bcd2d2e). Per-key region support (SC4) is still open.
 
 ### SC1d — Groq migration + Qwen endpoint
 
@@ -149,8 +150,8 @@ providers re-read on 2026-11-01.
   the failover loop, not done here.~~ Done in ST6 (`is_model_unavailable_error`,
   404s and model-unavailable 400s).
 - **Qwen keys are region-bound.** Callers with a China (Beijing) key now hit the
-  Singapore host and will fail; CONNECT.md still points at the China console.
-  Decide whether to document a Singapore key source or model region per key (SC4).
+  Singapore host and will fail. **Documented:** CONNECT.md now asks for a
+  Singapore-region key (commit bcd2d2e). Supporting a region per key is still SC4.
 - ~~**Tie-break is implicit.** The balanced tie is decided by dict order in
   prices.json. If a deliberate rule is wanted (cache rate, latency), make it
   explicit in `estimate_all_providers`.~~ Done in ST6 (cost, latency,
