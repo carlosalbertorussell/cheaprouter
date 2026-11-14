@@ -34,12 +34,14 @@ def test_get_omits_cache_when_absent():
 
 def test_get_unknown_provider():
     out = json.loads(_run(ps.pricing_get(ps.PricingGetInput(provider="nope", tier="tier_fast"))))
-    assert "error" in out
+    assert out["error"] == "unknown provider 'nope'"
+    assert "groq" in out["known"] and len(out["known"]) == 8
 
 
 def test_get_unknown_tier():
     out = json.loads(_run(ps.pricing_get(ps.PricingGetInput(provider="groq", tier="tier_bogus"))))
-    assert "error" in out
+    assert out["error"] == "unknown tier 'tier_bogus'"
+    assert out["valid"] == ["tier_balanced", "tier_fast", "tier_powerful"]
 
 
 # ─── pricing_list ─────────────────────────────────────────────────────────────

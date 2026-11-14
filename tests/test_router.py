@@ -49,9 +49,13 @@ def test_allowed_regions_filter():
 
 
 def test_savings_present_with_multiple_providers():
-    d = route(PROVIDERS, "tier_balanced", 5000, 1000, user_keys=ALL_KEYS)
-    assert d.savings is not None
-    assert d.savings["saved_usd"] >= 0
+    from pricing import compute_savings
+    d = route(PROVIDERS, "tier_balanced", 5000, 1000, user_keys=ALL_KEYS, health_aware=False)
+    eligible = [e for e in d.all_estimates if e.provider_id in d.ranked_pool]
+    priciest = max(eligible, key=lambda e: e.total_cost_usd)
+    assert d.savings == compute_savings(d.winner, priciest)
+    assert d.savings["saved_usd"] == round(priciest.total_cost_usd - d.winner.total_cost_usd, 8)
+    assert d.savings["saved_usd"] > 0
 
 
 def test_keys_never_leak_into_routing_output():
