@@ -134,7 +134,7 @@ class RouteCompletionInput(BaseModel):
     cached_input_tokens: int = Field(0, description=CACHE_DESC, ge=0, le=2_000_000)
     stream: bool = Field(False, description="Consume the provider's streaming endpoint (S5). Lowers time-to-first-token and reports it; the full text is still returned as one result at the end. Failover applies only before the first streamed token — a mid-stream error is terminal. Only Anthropic and OpenAI-compatible providers can stream; others fall back to a normal call.")
     session: Optional[str] = Field(None, description="Opaque session token to attribute spend to you. Reused across requests to track your own cumulative spend; never mapped to your identity.")
-    health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind healthy providers of similar price, but never excluded. Set False for pure cheapest-first routing.")
+    health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind all healthy providers whatever their price, but never excluded. Health is scored on the server's global history, shared across users. Set False for pure cheapest-first routing.")
     max_failover: int = Field(2, description="On a transient error (429/5xx/timeout), how many additional providers to try, in ranked order, before giving up. 0 disables failover. Non-transient errors (bad key, bad request) never fail over.", ge=0, le=7)
 
     @field_validator("tier")
@@ -155,12 +155,12 @@ class GetHistoryInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     limit: int = Field(20, description="Number of recent records to return", ge=1, le=100)
     summary_only: bool = Field(False, description="If True, return aggregated stats only")
-    session: Optional[str] = Field(None, description="Scope history to your session token. Omit to see the global (unscoped) history.")
+    session: Optional[str] = Field(None, description="Scope history to your session token. Omit to see every session's records (sessions appear only as hashes).")
 
 
 class SpendReportInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    session: Optional[str] = Field(None, description="Scope the report to your session token. Omit for global spend.")
+    session: Optional[str] = Field(None, description="Scope the report to your session token. Omit for every session's spend combined.")
     limit: int = Field(500, description="Max records to aggregate", ge=1, le=2000)
     since: Optional[str] = Field(None, description="ISO date/datetime (e.g. '2026-09-01'); exclude older records.")
 
@@ -728,7 +728,8 @@ async def arbitrage_get_history(params: GetHistoryInput) -> str:
 
     Records carry routing metadata only — provider, tier, region, token counts,
     cost, latency, savings — never API keys and never message content. Pass a
-    `session` token to see only your own records; omit it for the global history.
+    `session` token to see only your own records; omit it to see every session's
+    records (sessions appear only as hashes).
 
     Args:
         params (GetHistoryInput):
@@ -800,7 +801,8 @@ async def arbitrage_set_budget(params: SetBudgetInput) -> str:
     """
     Set a monthly USD spend budget for your session. Once set, every
     arbitrage_route_completion call made with the same session token returns a
-    budget status, with an alert when you cross 80% or go over.
+    budget status, with an alert when you cross 80% or go over. The budget is an
+    alert only: requests over budget still run.
 
     Args:
         params (SetBudgetInput):

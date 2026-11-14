@@ -4,8 +4,10 @@ Provider health tracking for cheaprouter (S8).
 Turns the routing history (storage.py) into a live signal: a provider that has
 been failing recently is *deprioritized* in routing — pushed toward the back of
 the cost ranking — rather than excluded outright. It stays eligible, so a brief
-blip never leaves a caller with no provider; it just won't be chosen while a
-healthy, comparably-priced alternative exists.
+blip never leaves a caller with no provider; it just won't be chosen while any
+healthy alternative exists, whatever that alternative costs.
+
+Health is scored on the server's global history, shared across every caller.
 
 This is the read-side companion to the failure records log_decision() already
 writes. It reads only metadata (provider_id, success, timestamp) — no keys, no

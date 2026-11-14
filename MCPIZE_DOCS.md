@@ -8,7 +8,8 @@ keys for whichever providers you have accounts with — cheaprouter compares pri
 checks availability, applies your constraints, and sends the request to the winner.
 
 Your keys are used only for the duration of the request. They are never stored,
-logged, or retained by the server in any form.
+logged, or retained by the server in any form. The hosted server never falls back
+to keys of its own: a provider you don't pass a key for is not eligible.
 
 ---
 
@@ -28,7 +29,7 @@ Once installed via MCPize, connect using your MCP client's remote server URL fie
 }
 ```
 
-**Claude.ai** — go to Settings → Integrations → Add MCP Server and paste the endpoint URL.
+**Claude.ai** — go to Settings → Connectors → Add custom connector and paste the endpoint URL `https://cheaprouter.mcpize.run/mcp`.
 
 ---
 
@@ -54,14 +55,20 @@ is automatically excluded from routing.
 
 ## Capability Tiers
 
-Rather than specifying model names directly, cheaprouter uses three tiers that map
-to semantically equivalent models across all providers:
+Rather than specifying model names directly, cheaprouter uses three tiers. Each
+tier groups one comparable model per provider; it is a price bucket, not a claim
+that the models are equivalent in quality. The router picks the cheapest provider
+in the tier you ask for, so choose the tier your task needs and use
+`excluded_providers` for models you don't want.
 
 | Tier | Best for | Example models |
 |------|----------|----------------|
 | `tier_fast` | Simple tasks, high volume, cost-sensitive | Haiku 5.5, GPT-6 Luna, Gemini 3.1 Flash-Lite, Llama 3.1 8B, Qwen Flash, DeepSeek Flash, Grok 4.3 |
-| `tier_balanced` | Most everyday tasks | Sonnet 5.5, GPT-6.1 Terra, Gemini 3.1 Flash-Lite, Llama 3.3 70B, Qwen Plus, DeepSeek Flash, Grok 4.3 |
-| `tier_powerful` | Complex reasoning, long context | Opus 5.5, GPT-6.1 Sol, Gemini 3.1 Pro (preview), Mistral Large 4, DeepSeek V4 Pro, Qwen Max, Grok 4.7 |
+| `tier_balanced` | Most everyday tasks | Sonnet 5.5, GPT-6.1 Terra, Gemini 3.1 Flash-Lite, Llama 3.3 70B, Mistral Large 4, Qwen Plus, DeepSeek Flash, Grok 4.3 |
+| `tier_powerful` | Complex reasoning, long context | Opus 5.5, GPT-6.1 Sol, Gemini 3.1 Pro (preview), Llama 3.3 70B, Mistral Large 4, DeepSeek V4 Pro, Qwen Max, Grok 4.7 |
+
+The fast tier also includes Mistral Small. Exact model IDs and prices are in
+`prices.json` and returned by `arbitrage_provider_status`.
 
 ---
 
@@ -81,6 +88,7 @@ don't yet have keys for.
 | `tier` | string | ✅ | — | `tier_fast`, `tier_balanced`, or `tier_powerful` |
 | `input_tokens` | integer | — | 1000 | Estimated input token count |
 | `output_tokens` | integer | — | 500 | Estimated output token count |
+| `cached_input_tokens` | integer | — | 0 | Of the input tokens, how many are expected cache hits |
 | `api_keys` | object | — | `{}` | Your provider API keys |
 
 **Example:**
@@ -115,7 +123,8 @@ Use this to preview routing decisions before committing.
 | `tier` | string | ✅ | — | Capability tier |
 | `input_tokens` | integer | ✅ | — | Estimated input tokens |
 | `output_tokens` | integer | ✅ | — | Estimated output tokens |
-| `api_keys` | object | ✅ | — | Your provider API keys |
+| `cached_input_tokens` | integer | — | 0 | Of the input tokens, how many are expected cache hits |
+| `api_keys` | object | — | `{}` | Your provider API keys. With none, no provider is eligible and the tool returns an error listing the exclusions |
 | `latency_sensitive` | boolean | — | `false` | Exclude providers above 300ms latency |
 | `excluded_providers` | array | — | `[]` | Provider IDs to skip, e.g. `["openai"]` |
 | `allowed_regions` | array | — | `null` | Restrict to regions, e.g. `["us", "eu"]` |
@@ -132,7 +141,8 @@ Use this to preview routing decisions before committing.
 ```
 
 **Returns:** JSON routing decision with winner, ranked alternatives, excluded
-providers with reasons, and savings vs. the most expensive alternative.
+providers with reasons, and savings vs. the most expensive eligible provider at the
+estimated token counts.
 
 ---
 
@@ -156,8 +166,9 @@ core tool — it selects the winner and makes the actual API call on your behalf
 | `estimated_output_tokens` | integer | — | 500 | Used for pre-flight cost routing |
 | `health_aware` | boolean | — | `true` | Deprioritize recently-failing providers (never excludes) |
 | `max_failover` | integer | — | 2 | On a transient error (429/5xx/timeout), how many further providers to try in ranked order. 0 disables. |
-| `cached_input_tokens` | integer | — | 0 | Of `input_tokens`, how many are expected cache hits. Priced at each model's cache-read rate for providers that support caching (Anthropic, OpenAI, DeepSeek), which can change the cheapest choice. |
-| `stream` | boolean | — | `false` | Consume the provider's streaming endpoint. Lowers time-to-first-token (reported as `time_to_first_token_ms`); the full text still returns as one result. Failover applies only before the first token. |
+| `cached_input_tokens` | integer | — | 0 | Of the input tokens, how many are expected cache hits. Priced at each model's cache-read rate where `prices.json` has one (Anthropic, Gemini, Mistral, DeepSeek, Grok, qwen-max), which can change the cheapest choice. |
+| `stream` | boolean | — | `false` | Consume the provider's streaming endpoint. Lowers time-to-first-token (reported as `time_to_first_token_ms`); the full text still returns as one result. Failover applies only before the first token. Anthropic and OpenAI-compatible providers only; Gemini falls back to a normal call. |
+| `session` | string | — | `null` | Opaque token to attribute spend to (see Sessions below). Required for budget alerts |
 
 **Example:**
 ```json
@@ -179,8 +190,18 @@ core tool — it selects the winner and makes the actual API call on your behalf
 ```
 
 **Returns:** JSON with the completion text, routing metadata (which provider was
-selected, model, region), actual token usage, actual cost, and savings vs. the
-most expensive eligible alternative.
+selected, model, region), actual token usage, and:
+
+- `cost.actual_cost_usd` — the provider's reported tokens at its `prices.json` rates,
+  with the cache-read rate applied to `cached_input_tokens` (capped at the actual
+  input tokens).
+- `cost.savings` — the provider that actually answered (after any failover) vs. the
+  **baseline**: the most expensive eligible provider, every provider priced at the
+  actual token counts. `vs_provider_id` names the baseline. `null` when only one
+  provider was eligible; 0 when the baseline itself answered.
+- `cost.estimated_savings` — the pre-flight figure for the routed winner.
+
+These are list-price figures from `prices.json`, not your provider invoice.
 
 **Failover:** if the first-choice provider returns a transient error (rate limit,
 server error, or timeout), cheaprouter automatically retries the next provider in
@@ -188,7 +209,8 @@ ranked order, up to `max_failover` times. Non-transient errors (bad key, malform
 request) stop immediately, since they'd fail the same way everywhere. The response
 includes `failed_over` (bool) and an `attempts` list showing each provider tried
 and its outcome. Every failed attempt also feeds provider health tracking, so a
-provider having a bad spell gets deprioritized on subsequent calls.
+provider having a bad spell gets deprioritized on subsequent calls. A failed
+attempt is recorded in history with cost 0 and savings 0.
 
 ---
 
@@ -202,7 +224,7 @@ to check which of your keys are recognised and what models are available per tie
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `api_keys` | object | — | `{}` | Your provider API keys |
-| `provider_id` | string | — | `null` | Specific provider: `anthropic`, `openai`, `gemini`, `groq`, `mistral`, `deepseek`, `qwen`. If omitted, returns all. |
+| `provider_id` | string | — | `null` | Specific provider: `anthropic`, `openai`, `gemini`, `groq`, `mistral`, `deepseek`, `qwen`, `grok`. If omitted, returns all. |
 
 **Example:**
 ```json
@@ -220,8 +242,9 @@ model IDs with pricing per tier.
 ### `arbitrage_get_history`
 
 Returns aggregated routing history — which providers were selected, actual token
-usage, cost, latency, and cumulative savings. History is server-side and covers
-all users; it records routing metadata only, never request content or API keys.
+usage, cost, latency, and cumulative savings. History is server-side; it records
+routing metadata only, never request content or API keys. Without `session` it
+returns every user's records (sessions appear only as hashes).
 
 **Parameters:**
 
@@ -229,17 +252,16 @@ all users; it records routing metadata only, never request content or API keys.
 |-----------|------|----------|---------|-------------|
 | `limit` | integer | — | 20 | Number of recent records (max 100) |
 | `summary_only` | boolean | — | `false` | Return aggregate stats only |
+| `session` | string | — | `null` | Scope to your session token. Omit for all sessions' records |
 
 **Example:**
 ```json
-{ "summary_only": true }
+{ "summary_only": true, "session": "my-app-prod" }
 ```
 
 **Returns:** JSON with total records, successful/failed counts, total cost,
 total savings, and per-provider usage counts. With `summary_only: false`,
 includes individual routing records.
-
-Pass `session` to scope history to your own records; omit it for the global view.
 
 ---
 
@@ -253,7 +275,7 @@ view for tracking cost over time.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `session` | string | — | `null` | Scope the report to your session token. Omit for global spend. |
+| `session` | string | — | `null` | Scope the report to your session token. Omit for every session's spend combined. |
 | `limit` | integer | — | 500 | Max records to aggregate |
 | `since` | string | — | `null` | ISO date (e.g. `2026-09-01`); exclude older records |
 
@@ -275,7 +297,8 @@ totals for cost and savings.
 
 Sets a monthly USD spend budget for your session. Once set, every
 `arbitrage_route_completion` call made with the same `session` token returns a
-budget status, with an alert when you cross 80% or go over.
+budget status, with an alert when you cross 80% or go over. A budget is an alert,
+not a limit: requests over budget still run.
 
 **Parameters:**
 
@@ -301,9 +324,12 @@ on, and whether it's currently healthy.
 
 A provider is marked unhealthy only once it has enough recent samples (default 3)
 and its success rate has dropped to or below the threshold (default 0.5). At that
-point routing automatically **deprioritizes** it — moves it behind healthy
-providers of similar price — but never excludes it, so a brief outage can't leave
-you with no provider.
+point routing automatically **deprioritizes** it — moves it behind *all* healthy
+providers, whatever their price — but never excludes it, so a brief outage can't
+leave you with no provider.
+
+Health is scored on the server's global routing history, shared across every user
+of the server. Any failed call counts, including one made with an invalid key.
 
 **Parameters:**
 
@@ -324,7 +350,9 @@ of currently unhealthy providers, and the thresholds in effect.
 ### `arbitrage_count_tokens`
 
 Count the input tokens for a set of messages (plus optional system prompt), using
-the same tokenizer cheaprouter uses for pre-flight cost routing. Handy for
+the same tokenizer cheaprouter uses for pre-flight cost routing: one tiktoken
+`o200k_base` encoder for every provider, so counts are close to, not identical
+with, each provider's own tokenizer. Handy for
 previewing request size, or feeding an exact count into `arbitrage_estimate_cost`.
 
 **Parameters:**
@@ -374,8 +402,14 @@ cheaprouter never holds your identity. To track your own spend, pass a `session`
 token — any opaque string you choose — on `arbitrage_route_completion`,
 `arbitrage_get_history`, `arbitrage_spend_report`, and `arbitrage_set_budget`.
 Reuse the same token across requests to accumulate spend under it. The server
-stores only a one-way hash of the token, never the raw value, and one session
-can never read another's records.
+stores only a one-way hash of the token, never the raw value.
+
+A session token groups records; it is not access control. A scoped read returns
+only that session's records, but `arbitrage_get_history` and
+`arbitrage_spend_report` called **without** `session` return every session's
+records (identified only by hash). Records never contain content or keys. Anyone
+who knows your token string can read its records, so pick one that is hard to
+guess. Scoping unscoped reads by default is a planned change.
 
 ---
 
@@ -387,10 +421,10 @@ Providers are selected using the following priority order:
 2. **Key availability** — providers without a supplied API key are excluded
 3. **Latency** — when `latency_sensitive: true`, providers with latency above 300ms are excluded (primarily affects DeepSeek and Qwen from outside Asia)
 4. **Region** — `allowed_regions` restricts the eligible pool to specific regions; useful for data residency requirements
-5. **Health** — when `health_aware: true` (default), providers failing more than half their recent calls are deprioritized (moved behind healthy providers of similar price). They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. `route_completion` reports any `deprioritized_providers` in its response.
-
-**Prompt caching:** pass `cached_input_tokens` to price cache-hit input at each model's cache-read rate. Anthropic, OpenAI, and DeepSeek offer prompt caching at a large discount, so on cache-heavy requests the cheapest provider can differ from the headline input-price ranking — a router blind to caching would overpay. Providers without a cache offering bill cached tokens at the full input rate, so they're never wrongly favoured.
+5. **Health** — when `health_aware: true` (default), providers whose recent success rate is at or below half are deprioritized: moved behind *all* healthy providers, whatever their price. They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. Health is scored on global history shared across users. `route_completion` reports any `deprioritized_providers` in its response.
 6. **Failover** — if the chosen provider returns a transient error, routing walks down the ranked pool to the next provider automatically (up to `max_failover`). This uses the same ordering health produces, so failover prefers healthy providers first.
+
+**Prompt caching:** pass `cached_input_tokens` to price cache-hit input at each model's cache-read rate. `prices.json` models cache-read rates for Anthropic, Gemini, Mistral, DeepSeek, Grok and qwen-max, so on cache-heavy requests the cheapest provider can differ from the headline input-price ranking. OpenAI's cache rates are not published on its current pricing page and are omitted; OpenAI, Groq, qwen-flash and qwen-plus bill cached tokens at the full input rate, so they're never wrongly favoured.
 
 ---
 
@@ -420,7 +454,11 @@ the numbers in `prices.json`, and set `verified_at` to today's date.
 - Mistral: mistral.ai/technology
 - DeepSeek: api-docs.deepseek.com/quick_start/pricing
 - Alibaba Qwen: alibabacloud.com/help/en/model-studio/models
-- xAI Grok: no official pricing page recorded; verify at console.x.ai
+- xAI Grok: docs.x.ai/docs/models
+
+These are the `pricing_urls` in `prices.json`. Groq and Qwen were carried, not
+re-read, at the 2026-11-01 verification (no priced page could be read); treat
+them as unverified until the next sweep.
 
 ---
 
@@ -429,7 +467,9 @@ the numbers in `prices.json`, and set `verified_at` to today's date.
 - API keys are passed per-request and used only for that request
 - Keys are never stored, logged, or included in routing history
 - Request content is never stored or logged
-- History records contain only: timestamp, provider selected, token counts, cost, latency
+- History records contain only: timestamp, hashed session, provider, tier, token counts, cost, savings, latency, success/error class
+- The hosted server never uses keys of its own: provider key environment variables are ignored over HTTP
+- Unscoped history and spend reports show every session's records (as hashes); health is computed from that shared history
 
 ---
 
@@ -440,9 +480,12 @@ No. cheaprouter works with any subset. Providers without a key are automatically
 excluded from routing. Start with one or two and add more as you get accounts.
 
 **Which providers give the best savings?**
-It depends on the tier. At `tier_fast`, Groq and Qwen Flash are typically the
-cheapest. At `tier_balanced`, DeepSeek V3 often wins by a wide margin. At
-`tier_powerful`, DeepSeek V4 Pro undercuts Western flagship models significantly.
+It depends on the tier and your keys. With every key supplied, no constraints and
+no cache, at 1,000 input / 500 output tokens the shipped table routes `tier_fast` to
+Groq llama-3.1-8b-instant, `tier_balanced` to DeepSeek deepseek-flash, and
+`tier_powerful` to Groq llama-3.3-70b-versatile. With `latency_sensitive: true`
+DeepSeek and Qwen drop out and Groq wins all three tiers. Cache-heavy requests can
+favour DeepSeek or Anthropic. Run `arbitrage_estimate_cost` for your own volumes.
 
 **What does `latency_sensitive` actually do?**
 It excludes providers whose estimated round-trip latency exceeds 300ms. From
@@ -501,18 +544,21 @@ human action). Optional `provider` filter.
 ```
 
 ### `pricing_history`
-How prices have changed over time — the citable, provenanced series. Pass
-`trajectory_only` with a `provider` + `model_id` for a clean oldest→newest price
-series.
+How prices have changed over time — the citable, provenanced series. Parameters:
+`provider`, `model_id`, `field` (default `input_price_per_1m`), `limit` (default
+200), `trajectory_only` (default false). Pass `trajectory_only` with a `provider` +
+`model_id` for a clean oldest→newest price series.
 ```json
 { "provider": "deepseek", "model_id": "deepseek-flash", "trajectory_only": true }
 ```
 
 ### `pricing_observed`
-Validates the verified table against **observed** signals — what real completions
-actually cost, published by the router (when `ARBITRAGE_EMIT_OBSERVED` is on).
-Reports `confirms` / `diverges` per point; a material divergence is a re-verify
-signal. Never changes a price.
+Compares the verified table with **observed** signals the router publishes (when
+`ARBITRAGE_EMIT_OBSERVED` is on): which model real completions used, at the unit
+price the router billed them at. Today the router emits the `prices.json` rate for
+that model, not a rate read from the provider's invoice, so this mainly catches a
+router running on a different table than the one served here. Reports
+`confirms` / `diverges` per point. Never changes a price.
 ```json
 { "limit": 500 }
 ```
