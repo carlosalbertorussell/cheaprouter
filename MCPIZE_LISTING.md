@@ -76,23 +76,21 @@ Prices are USD per 1M tokens from `prices.json` (verified_at 2026-11-01, max_age
 | OpenAI | powerful | gpt-6.1-sol | 2.00 | 10.00 | — | re-read |
 | Google Gemini | fast/balanced | gemini-3.1-flash-lite | 0.25 | 1.50 | 0.025 | re-read |
 | Google Gemini | powerful | gemini-3.1-pro-preview | 2.00 | 12.00 | 0.20 | re-read |
-| Groq | fast | llama-3.1-8b-instant | 0.05 | 0.08 | — | carried, not re-read |
-| Groq | balanced/powerful | llama-3.3-70b-versatile | 0.59 | 0.79 | — | carried, not re-read |
+| Groq | fast | openai/gpt-oss-20b | 0.075 | 0.30 | 0.037 | re-read |
+| Groq | balanced/powerful | openai/gpt-oss-120b | 0.15 | 0.60 | 0.075 | re-read |
 | Mistral AI | fast | mistral-small-latest | 0.15 | 0.60 | 0.015 | re-read |
 | Mistral AI | balanced/powerful | mistral-large-latest | 0.70 | 2.10 | 0.07 | re-read |
 | DeepSeek | fast/balanced | deepseek-flash | 0.15 | 0.60 | 0.003 | re-read |
 | DeepSeek | powerful | deepseek-v4-pro | 0.66 | 1.98 | 0.022 | re-read |
-| Alibaba Qwen | fast | qwen-flash | 0.05 | 0.40 | — | carried, not re-read |
-| Alibaba Qwen | balanced | qwen-plus | 0.40 | 1.20 | — | carried, not re-read |
-| Alibaba Qwen | powerful | qwen-max | 1.60 | 6.40 | 0.32 | carried, not re-read |
+| Alibaba Qwen | fast | qwen-flash | 0.05 | 0.40 | — | re-read |
+| Alibaba Qwen | balanced | qwen-plus | 0.40 | 1.20 | — | re-read |
+| Alibaba Qwen | powerful | qwen-max | 1.60 | 6.40 | 0.32 | re-read |
 | xAI Grok | fast/balanced | grok-4.3 | 1.25 | 2.50 | 0.20 | re-read |
 | xAI Grok | powerful | grok-4.7 | 2.00 | 6.00 | 0.50 | re-read |
 
-**Carried, not re-read on 2026-11-01:** Groq, Alibaba Qwen. `prices.json` keeps their previous values because no priced page could be read; treat them as unverified until the next sweep.
-
 These are list prices at standard context. DeepSeek is encoded at off-peak rates (peak is about 2x), Qwen at the Singapore endpoint with qwen-plus at the non-thinking rate. See the `notes` in `prices.json` for every caveat. Your negotiated rates may differ.
 
-With every key supplied, no constraints and no cache, routing picks **Groq llama-3.1-8b-instant** for fast, **DeepSeek deepseek-flash** for balanced and **Groq llama-3.3-70b-versatile** for powerful (1,000 input / 500 output tokens). Other volumes, cache hits, `latency_sensitive` or excluded providers can change the winner; `arbitrage_estimate_cost` shows it for your request.
+With every key supplied, no constraints and no cache, routing picks **Groq openai/gpt-oss-20b** for fast, **Groq openai/gpt-oss-120b** for balanced and **Groq openai/gpt-oss-120b** for powerful (1,000 input / 500 output tokens). Other volumes, cache hits, `latency_sensitive` or excluded providers can change the winner; `arbitrage_estimate_cost` shows it for your request.
 <!-- END GENERATED: prices -->
 
 ## 4. What an agent can't do here (why this is a checklist, not an automated update)
