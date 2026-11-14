@@ -300,3 +300,20 @@ def test_transient_flag_written_on_records(local_backend):
     _bad_key()
     recs = history.read_history(limit=3)            # newest first
     assert [r["transient"] for r in recs] == [False, True, False]
+
+
+def test_int_env_knobs_fall_back_on_garbage(monkeypatch):
+    import health
+    monkeypatch.setenv("HEALTH_MAX_PER_SESSION", "lots")
+    assert health._int_env("HEALTH_MAX_PER_SESSION", 5) == 5
+    monkeypatch.setenv("HEALTH_MAX_PER_SESSION", "0")
+    assert health._int_env("HEALTH_MAX_PER_SESSION", 5) == 1     # floored at 1
+    monkeypatch.setenv("HEALTH_MAX_PER_SESSION", "9")
+    assert health._int_env("HEALTH_MAX_PER_SESSION", 5) == 9
+
+
+def test_records_without_a_provider_are_skipped(local_backend):
+    import health
+    history.log_decision({"winner": {}, "tier": "tier_fast", "savings": {}},
+                         session="x", error="boom", transient=True)
+    assert health.provider_health() == {}

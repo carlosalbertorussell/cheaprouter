@@ -178,3 +178,12 @@ def test_health_still_reads_every_session_internally(three_sessions):
     import health
     snap = health.provider_health()
     assert snap["groq"]["samples"] == 3 and snap["groq"]["sessions"] == 3
+
+
+def test_empty_summary_and_report_still_carry_scope(route_env, monkeypatch):
+    monkeypatch.delenv("ARBITRAGE_ALLOW_GLOBAL_READS", raising=False)
+    s = route_env.server
+    summ = json.loads(_run(s.arbitrage_get_history(s.GetHistoryInput(summary_only=True))))
+    assert summ == {"total_records": 0, "message": "No history found.", "scope": "anon"}
+    rep = json.loads(_run(s.arbitrage_spend_report(s.SpendReportInput())))
+    assert rep == {"total_records": 0, "message": "No spend in range.", "scope": "anon"}
