@@ -89,3 +89,39 @@ def test_method_reported(monkeypatch):
     # heuristic branch
     monkeypatch.setattr(tokens, "_get_encoder", lambda: None)
     assert tokens.count_text_tokens("hello world") > 0
+
+
+# ─── fallbacks when the encoder misbehaves ────────────────────────────────────
+
+def test_encoder_load_failure_falls_back_to_heuristic(monkeypatch):
+    import sys, types
+    broken = types.ModuleType("tiktoken")
+    def _boom(name):
+        raise RuntimeError("encoding download failed")
+    broken.get_encoding = _boom
+    monkeypatch.setitem(sys.modules, "tiktoken", broken)
+    assert tokens._get_encoder() is None
+    assert tokens._encoder_loaded is True          # cached: not retried per call
+    text = "one two three four five six"
+    assert tokens.count_text_tokens(text) == tokens._heuristic_tokens(text) == 8
+
+
+def test_encode_exception_falls_back_to_heuristic(monkeypatch):
+    class _Enc:
+        def encode(self, text):
+            raise ValueError("disallowed special token")
+    monkeypatch.setattr(tokens, "_get_encoder", lambda: _Enc())
+    assert tokens.count_text_tokens("<|endoftext|> hi") == tokens._heuristic_tokens("<|endoftext|> hi")
+
+
+def test_heuristic_exact_values():
+    assert tokens._heuristic_tokens("a b c") == 4          # int(3 / 0.75)
+    assert tokens._heuristic_tokens("x") == 1              # floor of 1
+    assert tokens._heuristic_tokens("汉" * 60) == 10        # int(60/1.5)//4, no spaces
+
+
+def test_message_count_exact_with_heuristic(monkeypatch):
+    monkeypatch.setattr(tokens, "_get_encoder", lambda: None)
+    msgs = [{"role": "user", "content": "a b c"}, {"role": "assistant", "content": ""}]
+    # 4 + overhead 4, then 0 + overhead 4, plus system "x" = 1
+    assert tokens.count_message_tokens(msgs, system_prompt="x") == 13
