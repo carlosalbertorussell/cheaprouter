@@ -54,7 +54,7 @@ from client import call_provider, is_transient_error, stream_provider, stream_su
 from tokens import count_message_tokens
 from history import (
     log_decision, read_history, history_summary,
-    spend_report, set_budget, budget_status,
+    spend_report, set_budget, budget_status, caller_scope,
 )
 
 mcp = FastMCP(
@@ -134,7 +134,7 @@ class RouteCompletionInput(BaseModel):
     cached_input_tokens: int = Field(0, description=CACHE_DESC, ge=0, le=2_000_000)
     stream: bool = Field(False, description="Consume the provider's streaming endpoint (S5). Lowers time-to-first-token and reports it; the full text is still returned as one result at the end. Failover applies only before the first streamed token — a mid-stream error is terminal. Only Anthropic and OpenAI-compatible providers can stream; others fall back to a normal call.")
     session: Optional[str] = Field(None, description="Opaque session token to attribute spend to you. Reused across requests to track your own cumulative spend; never mapped to your identity.")
-    health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind all healthy providers whatever their price, but never excluded. Health is scored on the server's global history, shared across users. Set False for pure cheapest-first routing.")
+    health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind all healthy providers whatever their price, but never excluded. Health is scored on the server's global history, shared across users, counting only provider-side failures (429/5xx/timeouts/connection errors, never bad keys or bad requests), capping how much any one session contributes, and requiring failures from at least two sessions by default. Set False for pure cheapest-first routing.")
     max_failover: int = Field(2, description="On a transient error (429/5xx/timeout), how many additional providers to try, in ranked order, before giving up. 0 disables failover. Non-transient errors (bad key, bad request) never fail over.", ge=0, le=7)
 
     @field_validator("tier")
@@ -155,12 +155,12 @@ class GetHistoryInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     limit: int = Field(20, description="Number of recent records to return", ge=1, le=100)
     summary_only: bool = Field(False, description="If True, return aggregated stats only")
-    session: Optional[str] = Field(None, description="Scope history to your session token. Omit to see every session's records (sessions appear only as hashes).")
+    session: Optional[str] = Field(None, description="Your session token; you see only that token's records. Omit to see only the shared 'anon' session's records (calls made without a token), never other sessions'. An all-sessions view exists only when the operator sets ARBITRAGE_ALLOW_GLOBAL_READS=1.")
 
 
 class SpendReportInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    session: Optional[str] = Field(None, description="Scope the report to your session token. Omit for every session's spend combined.")
+    session: Optional[str] = Field(None, description="Your session token; the report covers only that token's spend. Omit to report only the shared 'anon' session's spend (calls made without a token), never other sessions'. An all-sessions report exists only when the operator sets ARBITRAGE_ALLOW_GLOBAL_READS=1.")
     limit: int = Field(500, description="Max records to aggregate", ge=1, le=2000)
     since: Optional[str] = Field(None, description="ISO date/datetime (e.g. '2026-09-01'); exclude older records.")
 
@@ -480,7 +480,8 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
     # Failover loop (S2): walk the ranked pool in order. On a transient error
     # (429/5xx/timeout) move to the next provider; on a non-transient error (bad
     # key/request) stop immediately since it would fail identically everywhere.
-    # Every failed attempt is logged as a failure, which feeds S8 health scoring.
+    # Every failed attempt is logged as a failure with its transient flag; only
+    # transient (provider-side) failures count against S8 health (ST5).
     ranked = decision.ranked_pool or [decision.winner.provider_id]
     max_attempts = 1 + max(0, params.max_failover)
     sequence = ranked[:max_attempts]
@@ -560,6 +561,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
                 session=params.session,
                 actual_cost_usd=0.0,
                 error=str(exc),
+                transient=transient,
             )
             if mid_stream:
                 # Tokens already streamed — failover is unsafe. Terminal.
@@ -587,7 +589,11 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
             from price_history import record_observed
             record_observed(
                 provider=used.provider_id,
-                model_id=completion.model_id,
+                # The table's model ID, so observed_validation can match it
+                # against prices.json; the provider may answer with a dated
+                # snapshot ID, kept separately (ST5).
+                model_id=model.model_id,
+                served_model_id=completion.model_id,
                 tier=params.tier,
                 observed_input_per_1m=model.input_price_per_1m,
                 observed_output_per_1m=model.output_price_per_1m,
@@ -727,30 +733,38 @@ async def arbitrage_get_history(params: GetHistoryInput) -> str:
     Return past routing decisions with cost tracking and savings analysis.
 
     Records carry routing metadata only — provider, tier, region, token counts,
-    cost, latency, savings — never API keys and never message content. Pass a
-    `session` token to see only your own records; omit it to see every session's
-    records (sessions appear only as hashes).
+    cost, latency, savings — never API keys and never message content.
+
+    You only ever see your own records. Pass a `session` token to see that
+    token's records. Without one you see only the shared "anon" session (every
+    call made without a token), never other sessions' records. An all-sessions
+    view exists only when the operator sets ARBITRAGE_ALLOW_GLOBAL_READS=1. The
+    response's `scope` says which view you got.
 
     Args:
         params (GetHistoryInput):
             - limit (int): Number of recent records (default 20, max 100)
             - summary_only (bool): If True, return aggregate stats only
-            - session (str, optional): Scope to your session token
+            - session (str, optional): Your session token
 
     Returns:
-        str: JSON with routing history or aggregate summary.
+        str: JSON with routing history or aggregate summary, plus `scope`
+             ("session", "anon" or "all_sessions").
     """
+    key, scope = caller_scope(params.session)
     if params.summary_only:
-        summary = await asyncio.to_thread(history_summary, params.limit, params.session)
-        return json.dumps(summary, indent=2)
+        summary = await asyncio.to_thread(history_summary, params.limit, key=key)
+        return json.dumps({**summary, "scope": scope}, indent=2)
 
-    records = await asyncio.to_thread(read_history, params.limit, params.session)
+    records = await asyncio.to_thread(read_history, params.limit, key=key)
     if not records:
-        return json.dumps({"message": "No routing history found.", "records": []})
+        return json.dumps({"message": "No routing history found.", "records": [],
+                           "scope": scope})
 
     return json.dumps(
-        {"summary": await asyncio.to_thread(history_summary, params.limit, params.session),
-         "records": records},
+        {"summary": await asyncio.to_thread(history_summary, params.limit, key=key),
+         "records": records,
+         "scope": scope},
         indent=2,
     )
 
@@ -770,21 +784,26 @@ async def arbitrage_spend_report(params: SpendReportInput) -> str:
     Break down spend by provider, by tier, and by day, with total saved vs. the
     most expensive alternative at each routing decision.
 
-    Pass a `session` token to scope the report to your own spend. Requires the
-    persistent store (Upstash) to be useful across redeploys; with local JSONL
-    it reflects only the current container's history.
+    The report covers only your own spend: pass a `session` token for that
+    token's spend. Without one it covers only the shared "anon" session (every
+    call made without a token), never other sessions'. An all-sessions report
+    exists only when the operator sets ARBITRAGE_ALLOW_GLOBAL_READS=1; the
+    response's `scope` says which you got. Requires the persistent store
+    (Upstash) to be useful across redeploys; with local JSONL it reflects only
+    the current container's history.
 
     Args:
         params (SpendReportInput):
-            - session (str, optional): Scope to your session token
+            - session (str, optional): Your session token
             - limit (int): Max records to aggregate (default 500)
             - since (str, optional): ISO date; exclude older records
 
     Returns:
         str: JSON with spend_by_provider, spend_by_tier, spend_by_day, and totals.
     """
-    report = await asyncio.to_thread(spend_report, params.session, params.limit, params.since)
-    return json.dumps(report, indent=2)
+    key, scope = caller_scope(params.session)
+    report = await asyncio.to_thread(spend_report, None, params.limit, params.since, key=key)
+    return json.dumps({**report, "scope": scope}, indent=2)
 
 
 @mcp.tool(
@@ -832,10 +851,18 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
     Report recent health per provider, derived from routing history.
 
     For each provider seen in the recent window, returns its success rate, the
-    number of records scored, and whether it is currently healthy. A provider is
-    marked unhealthy only once it has enough recent samples and its success rate
-    has dropped to or below the threshold — at which point routing automatically
-    deprioritizes it (moves it behind healthy providers, without excluding it).
+    number of records scored, how many distinct sessions they came from, and
+    whether it is currently healthy. A provider is marked unhealthy only once it
+    has enough recent samples and its success rate has dropped to or below the
+    threshold — at which point routing automatically deprioritizes it (moves it
+    behind healthy providers, without excluding it).
+
+    Only provider-side failures count (429, 5xx, timeouts, connection errors).
+    Caller errors such as a bad key (401/403) or a bad request (400/404) are
+    ignored, each session contributes at most `max_per_session` records per
+    provider, and a provider is marked unhealthy only when failures come from at
+    least `min_failing_sessions` distinct sessions, so no single caller can make
+    a provider look unhealthy for others.
 
     Providers absent from the report have no recent history and are treated as
     healthy by the router.
@@ -845,10 +872,11 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
             - window (int, optional): How many recent records to score (default 50)
 
     Returns:
-        str: JSON mapping provider_id -> {score, samples, healthy}, plus the
-             thresholds in effect.
+        str: JSON mapping provider_id -> {score, samples, healthy, sessions,
+             failing_sessions}, plus the thresholds in effect.
     """
-    from health import HEALTH_MIN_SAMPLES, HEALTH_THRESHOLD, HEALTH_WINDOW
+    from health import (HEALTH_MAX_PER_SESSION, HEALTH_MIN_SAMPLES, HEALTH_MIN_SESSIONS,
+                        HEALTH_SCAN_FACTOR, HEALTH_THRESHOLD, HEALTH_WINDOW)
     snap = await asyncio.to_thread(provider_health, limit=params.window)
     unhealthy = [pid for pid, h in snap.items() if not h["healthy"]]
     return json.dumps({
@@ -858,7 +886,13 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
             "window": params.window or HEALTH_WINDOW,
             "min_samples": HEALTH_MIN_SAMPLES,
             "unhealthy_at_success_rate_below_or_equal": HEALTH_THRESHOLD,
+            "max_per_session": HEALTH_MAX_PER_SESSION,
+            "min_failing_sessions": HEALTH_MIN_SESSIONS,
+            "scan_factor": HEALTH_SCAN_FACTOR,
         },
+        "counts": "Successes and provider-side transient failures (429, 5xx, timeouts, "
+                  "connection errors). Caller errors (bad key, bad request) and "
+                  "unclassified pre-ST5 failures are ignored.",
         "note": "Unhealthy providers are deprioritized in routing, never excluded.",
     }, indent=2)
 

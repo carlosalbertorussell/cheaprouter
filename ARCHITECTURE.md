@@ -76,15 +76,15 @@ they are equivalent; the router picks the cheapest in the tier you ask for.
 2. **Availability** — providers without a supplied key are excluded
 3. **Latency** — when `latency_sensitive=true`, providers above the threshold (default 300ms) are dropped
 4. **Region** — `allowed_regions` / `BLOCKED_REGIONS` constrain the pool
-5. **Health** (S8) — providers failing recently are sunk behind *all* healthy ones, whatever their price; never excluded, so a blip can't strand a caller. Health is scored on the server's global history, shared across users
+5. **Health** (S8) — providers failing recently are sunk behind *all* healthy ones, whatever their price; never excluded, so a blip can't strand a caller. Health is scored on the server's global history, shared across users, but counts only provider-side transient failures (never a caller's bad key or bad request), caps each session's contribution, and needs failures from at least two sessions (ST5)
 6. **Failover** (S2) — on a transient error the next provider in this order is tried, up to `max_failover`
 
 ## BYOK & privacy invariants
 
 - API keys arrive per request in `api_keys`, are used for that one call, and are never persisted or logged
 - Request content (`messages`) is forwarded to the chosen provider and never stored
-- History records carry only: timestamp, hashed session, provider, tier, token counts, cost, savings, latency, success/error class
-- A session token is a grouping key, not access control. Scoped reads return only that session's records, but unscoped `arbitrage_get_history` and `arbitrage_spend_report` return every session's records (sessions shown as hashes)
+- History records carry only: timestamp, hashed session, provider, tier, token counts, cost, savings, latency, success/error class, transient-failure flag
+- A session token is a grouping key, not access control. `arbitrage_get_history` and `arbitrage_spend_report` return only the caller's records: a token reads its own, no token reads only the shared `anon` session. An all-sessions view needs the operator opt-in `ARBITRAGE_ALLOW_GLOBAL_READS=1`
 - The server holds no provider credentials. Over HTTP it ignores provider key env vars, so it can never spend an operator's keys; the env fallback works only over stdio or with `ARBITRAGE_ALLOW_ENV_KEYS=1`
 
 ## Transport

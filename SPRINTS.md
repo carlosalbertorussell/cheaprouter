@@ -7,6 +7,81 @@ One task per unit, PARTIAL-honest over DONE-false, closures noted inline.
 
 ## Active
 
+### ST5 — Abuse-resistant health and scoped reads
+
+**Goal:** no single caller can steer provider health for everyone else, while
+health still catches real outages; history and spend reads show a caller only
+their own records unless the operator opts in to a global view. Plus small
+correctness fixes found in the ST4 review.
+
+**Delivered on this branch:**
+- **Abuse-resistant health** (`health.py`). History records gain a privacy-clean
+  `transient` boolean (in `storage.ALLOWED_FIELDS`, set by `build_record` from
+  `log_decision(transient=...)`; the server classifies with
+  `client.is_transient_error` at write time). Scoring rules:
+  - only successes and transient, provider-side failures (429, 5xx, timeouts,
+    connection errors) are scored; 401/403/400/404 are ignored entirely;
+  - **legacy records** (no `transient` field): successes count, failures do not.
+    Pre-ST5 `error_class` can't reliably separate a timeout from a bad key, so the
+    conservative call is to forget pre-ST5 failures at deploy (one window to
+    rebuild). An unclassified new failure (`transient: null`) is treated the same;
+  - each session contributes at most `HEALTH_MAX_PER_SESSION` (default 5) records
+    per provider, newest first (successes too, so one caller can't mask an outage);
+  - a provider is unhealthy only when its scored failures come from at least
+    `HEALTH_MIN_SESSIONS` (default 2) distinct sessions. Without this a caller
+    flooding the shared recent list with its own 429s could push every other
+    record out of the scan and leave only its capped failures. Single-user servers
+    set it to 1;
+  - `HEALTH_WINDOW` now counts *scored* records; up to `HEALTH_SCAN_FACTOR`
+    (default 4) times as many raw records are read in the same one request, so
+    ignored caller errors can't crowd real evidence out.
+  `HEALTH_WINDOW`, `HEALTH_MIN_SAMPLES`, `HEALTH_THRESHOLD` work as before.
+  `arbitrage_provider_health` keeps `{score, samples, healthy}` and adds
+  `sessions`, `failing_sessions` and the new thresholds. Health still reads
+  unscoped history internally (`history.read_history(session=None)`), never via
+  the tool. No new writes; the Upstash write is still the one background pipeline.
+- **Scoped reads by default.** `arbitrage_get_history` / `arbitrage_spend_report`
+  without `session` read the shared `anon` session only, never everyone's; with a
+  token, that token's records (unchanged). All-sessions view only with the
+  operator opt-in `ARBITRAGE_ALLOW_GLOBAL_READS=1`. Responses gain `scope`
+  (`session` / `anon` / `all_sessions`). `history.caller_scope()` resolves the
+  key; the module docstring now says exactly this. Tool docstrings, parameter
+  descriptions, README, MCPIZE_DOCS, SECURITY, SKILL.md, ARCHITECTURE and
+  mcpize.yaml updated.
+- **Observed model ID.** Confirmed real: the router recorded `completion.model_id`
+  (what the provider returned, e.g. a dated snapshot), while
+  `refresh.observed_validation` keys on the prices.json model ID, so such entries
+  never matched. Observed entries now carry the table's `model_id`, with the
+  provider's ID in a separate `served_model_id` (only when it differs).
+- **prices.json `notes.caching`** text corrected (Mistral is modelled, OpenAI is
+  not). No price changed; `gen_listing.py` reads only the provider-prefixed
+  `CARRIED` notes, so the listing is unaffected (`--check` passes).
+- **`.coverage` untracked** and coverage outputs added to `.gitignore`.
+
+**Tests:** `tests/test_health.py` (50 bad-key failures from one session never
+count; 400/403/404 ignored; bad-key spam can't flood out real evidence;
+transient failures across sessions deprioritize; one session's 429 storm is
+capped; a window-flooding session can't condemn; success spam is capped too;
+legacy and unclassified records; knobs), `tests/test_st5_abuse_and_scope.py`
+(end to end through `arbitrage_route_completion`: 401/400/403/404 never
+deprioritize, 503/429/timeout/connect outages across sessions do, a one-session
+429 storm doesn't; scoped reads: no session sees only anon, never other hashes;
+opt-in returns all; scoped reads unchanged; health still reads all sessions),
+`tests/test_observed.py` (dated served ID still validates). 452 tests pass
+(random order, several runs); coverage 96.6%.
+
+**PARTIAL / deferred:**
+- **Not Sybil-proof.** Session tokens are caller-chosen, so a caller rotating
+  tokens still looks like several sessions; the cap and the two-session rule stop
+  a single caller, not a determined one. Per-key-hash attribution would need a key
+  fingerprint in records, which Invariant A rules out today.
+- **`anon` is shared.** Every caller without a token reads and writes the same
+  `anon` records (and shares one health cap). Documented; a private view needs a
+  token.
+- **429 is counted as provider-side** as specified, though a 429 can reflect the
+  caller's own key quota; the per-session cap and two-session rule bound it.
+- **Groq and Qwen re-read** is a separate, human-verified step; not done in ST5.
+
 ### ST4 — Hosted key safety, savings maths and docs accuracy
 
 **Goal:** a hosted server must never spend its operator's provider keys; the cost
@@ -61,14 +136,15 @@ spend report), `tests/test_listing.py`. 371 tests pass (random order, 10 runs);
 coverage 96.6%.
 
 **PARTIAL / deferred:**
-- **Unscoped reads are not scoped by default.** `arbitrage_get_history` and
-  `arbitrage_spend_report` without `session` still return every session's records
-  (as hashes). Docs now say so; making them scoped by default is a follow-up.
-- **Health is global, not per user.** Any caller's failures, including bad-key
-  401s, deprioritize a provider for everyone. Per-user (or per-key-hash) health
-  is a follow-up.
+- ~~**Unscoped reads are not scoped by default.**~~ **Done in ST5:** without
+  `session` the history and spend tools read only the `anon` session; global
+  reads need `ARBITRAGE_ALLOW_GLOBAL_READS=1`.
+- ~~**Health is global, not per user.**~~ **Done in ST5 (abuse-resistant, still
+  global):** caller errors no longer count, each session's say is capped, and one
+  session alone can't condemn a provider. Not per key hash (see ST5 deferred).
 - **Groq and Qwen prices are still carried, not re-read.** They need a priced
-  source (console.groq.com; a priced Model Studio page).
+  source (console.groq.com; a priced Model Studio page). Still open after ST5: a
+  separate, human-verified step.
 - **Business decisions CR-06 (Pro price / free-Pro boundary) and CR-03
   (liability for "certified")** are the owner's; PRICING_STRATEGY.md,
   TICKER_VISION.md and PRICING_SERVER_BLUEPRINT.md were not touched.

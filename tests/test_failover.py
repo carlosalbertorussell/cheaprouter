@@ -85,12 +85,13 @@ def test_deprioritized_provider_last_in_pool(tmp_path, monkeypatch):
     monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
     monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
     monkeypatch.setenv("ARBITRAGE_HISTORY_FILE", str(tmp_path / "h.jsonl"))
-    for _ in range(5):
+    for i in range(5):
         history.log_decision(
             {"winner": {"provider_id": "groq", "provider_name": "Groq",
                         "region": "us", "total_cost_usd": 0.001},
              "tier": "tier_fast", "savings": {}},
-            session="t", actual_cost_usd=0.001, error="RateLimitError: 429")
+            session=f"t{i}", actual_cost_usd=0.001, error="RateLimitError: 429",
+            transient=True)
     d = route(PROVIDERS, "tier_fast", 1000, 500, user_keys=ALL_KEYS, health_aware=True)
     assert d.ranked_pool[-1] == "groq"       # sunk to the back
     assert d.ranked_pool[0] != "groq"        # not the first attempt

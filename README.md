@@ -201,7 +201,10 @@ Priority order:
 4. **Region** — optional `allowed_regions` or global `BLOCKED_REGIONS` env var
 5. **Health** — with `health_aware` (default), a provider failing in recent history
    moves behind *all* healthy providers, whatever their price. It is never excluded.
-   Health is scored on the server's global history, shared across every user.
+Health is scored on the server's global history, shared across every user,
+   but only provider-side failures count (429, 5xx, timeouts, connection errors);
+   a caller's bad key or bad request never does, each session's say is capped, and
+   one session alone cannot mark a provider unhealthy.
 6. **Failover** — on a transient error (429/5xx/timeout) the next provider in that
    order is tried, up to `max_failover`.
 

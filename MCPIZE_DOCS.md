@@ -164,7 +164,7 @@ core tool — it selects the winner and makes the actual API call on your behalf
 | `excluded_providers` | array | — | `[]` | Provider IDs to skip |
 | `allowed_regions` | array | — | `null` | Restrict to these regions |
 | `estimated_output_tokens` | integer | — | 500 | Used for pre-flight cost routing |
-| `health_aware` | boolean | — | `true` | Deprioritize recently-failing providers (never excludes) |
+| `health_aware` | boolean | — | `true` | Deprioritize providers with recent provider-side failures (never excludes) |
 | `max_failover` | integer | — | 2 | On a transient error (429/5xx/timeout), how many further providers to try in ranked order. 0 disables. |
 | `cached_input_tokens` | integer | — | 0 | Of the input tokens, how many are expected cache hits. Priced at each model's cache-read rate where `prices.json` has one (Anthropic, Gemini, Mistral, DeepSeek, Grok, qwen-max), which can change the cheapest choice. |
 | `stream` | boolean | — | `false` | Consume the provider's streaming endpoint. Lowers time-to-first-token (reported as `time_to_first_token_ms`); the full text still returns as one result. Failover applies only before the first token. Anthropic and OpenAI-compatible providers only; Gemini falls back to a normal call. |
@@ -208,8 +208,10 @@ server error, or timeout), cheaprouter automatically retries the next provider i
 ranked order, up to `max_failover` times. Non-transient errors (bad key, malformed
 request) stop immediately, since they'd fail the same way everywhere. The response
 includes `failed_over` (bool) and an `attempts` list showing each provider tried
-and its outcome. Every failed attempt also feeds provider health tracking, so a
-provider having a bad spell gets deprioritized on subsequent calls. A failed
+and its outcome. Every transient failure (rate limit, server error, timeout,
+connection error) also feeds provider health tracking, so a provider having a bad
+spell gets deprioritized on subsequent calls; errors caused by the caller (bad
+key, bad request) never count against a provider. A failed
 attempt is recorded in history with cost 0 and savings 0.
 
 ---
@@ -243,8 +245,12 @@ model IDs with pricing per tier.
 
 Returns aggregated routing history — which providers were selected, actual token
 usage, cost, latency, and cumulative savings. History is server-side; it records
-routing metadata only, never request content or API keys. Without `session` it
-returns every user's records (sessions appear only as hashes).
+routing metadata only, never request content or API keys. You see only your own
+records: with `session`, that token's records; without it, only the shared `anon`
+session's records (every call made without a token), never other sessions'. An
+all-sessions view exists only when the operator sets
+`ARBITRAGE_ALLOW_GLOBAL_READS=1`. The response's `scope` field (`session`,
+`anon` or `all_sessions`) says which view you got.
 
 **Parameters:**
 
@@ -252,7 +258,7 @@ returns every user's records (sessions appear only as hashes).
 |-----------|------|----------|---------|-------------|
 | `limit` | integer | — | 20 | Number of recent records (max 100) |
 | `summary_only` | boolean | — | `false` | Return aggregate stats only |
-| `session` | string | — | `null` | Scope to your session token. Omit for all sessions' records |
+| `session` | string | — | `null` | Your session token; you see only its records. Omit to see only the shared `anon` session's records, never other sessions' |
 
 **Example:**
 ```json
@@ -275,7 +281,7 @@ view for tracking cost over time.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `session` | string | — | `null` | Scope the report to your session token. Omit for every session's spend combined. |
+| `session` | string | — | `null` | Your session token; the report covers only its spend. Omit to report only the shared `anon` session's spend, never other sessions'. |
 | `limit` | integer | — | 500 | Max records to aggregate |
 | `since` | string | — | `null` | ISO date (e.g. `2026-09-01`); exclude older records |
 
@@ -329,7 +335,20 @@ providers, whatever their price — but never excludes it, so a brief outage can
 leave you with no provider.
 
 Health is scored on the server's global routing history, shared across every user
-of the server. Any failed call counts, including one made with an invalid key.
+of the server, so it is built to resist one caller steering it:
+
+- Only provider-side failures count: 429, 5xx, timeouts and connection errors.
+  Caller errors (401/403 bad key, 400/404 bad request) are ignored entirely.
+- Each session contributes at most 5 records per provider to the score
+  (`HEALTH_MAX_PER_SESSION`); callers without a token share the `anon` session.
+- A provider is marked unhealthy only when its failures come from at least 2
+  distinct sessions (`HEALTH_MIN_SESSIONS`; a single-user server should set it
+  to 1).
+- Failure records written before this change carry no transient flag and are
+  not counted; successes from before it still are.
+
+Session tokens are chosen by callers, so someone rotating tokens can still look
+like several callers: the cap limits one caller, it is not Sybil-proof.
 
 **Parameters:**
 
@@ -342,8 +361,12 @@ of the server. Any failed call counts, including one made with an invalid key.
 { "window": 100 }
 ```
 
-**Returns:** JSON mapping `provider_id` to `{score, samples, healthy}`, the list
-of currently unhealthy providers, and the thresholds in effect.
+**Returns:** JSON mapping `provider_id` to `{score, samples, healthy, sessions,
+failing_sessions}`, the list of currently unhealthy providers, and the thresholds
+in effect (`window`, `min_samples`, the success-rate threshold,
+`max_per_session`, `min_failing_sessions`, `scan_factor`). `window` counts scored
+records; up to `scan_factor` times as many raw records are read so ignored ones
+can't crowd real evidence out.
 
 ---
 
@@ -404,12 +427,14 @@ token — any opaque string you choose — on `arbitrage_route_completion`,
 Reuse the same token across requests to accumulate spend under it. The server
 stores only a one-way hash of the token, never the raw value.
 
-A session token groups records; it is not access control. A scoped read returns
-only that session's records, but `arbitrage_get_history` and
-`arbitrage_spend_report` called **without** `session` return every session's
-records (identified only by hash). Records never contain content or keys. Anyone
+A session token groups records; it is not access control. `arbitrage_get_history`
+and `arbitrage_spend_report` return only the caller's own records: a token reads
+that token's records, and a call **without** `session` reads only the shared
+`anon` session — every call made without a token, so those callers can see each
+other's anon records. An all-sessions view exists only when the operator sets
+`ARBITRAGE_ALLOW_GLOBAL_READS=1`. Records never contain content or keys. Anyone
 who knows your token string can read its records, so pick one that is hard to
-guess. Scoping unscoped reads by default is a planned change.
+guess.
 
 ---
 
@@ -421,7 +446,7 @@ Providers are selected using the following priority order:
 2. **Key availability** — providers without a supplied API key are excluded
 3. **Latency** — when `latency_sensitive: true`, providers with latency above 300ms are excluded (primarily affects DeepSeek and Qwen from outside Asia)
 4. **Region** — `allowed_regions` restricts the eligible pool to specific regions; useful for data residency requirements
-5. **Health** — when `health_aware: true` (default), providers whose recent success rate is at or below half are deprioritized: moved behind *all* healthy providers, whatever their price. They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. Health is scored on global history shared across users. `route_completion` reports any `deprioritized_providers` in its response.
+5. **Health** — when `health_aware: true` (default), providers whose recent success rate is at or below half are deprioritized: moved behind *all* healthy providers, whatever their price. They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. Health is scored on global history shared across users, counting only provider-side failures (never a caller's bad key or bad request), capping each session's contribution and needing failures from at least two sessions. `route_completion` reports any `deprioritized_providers` in its response.
 6. **Failover** — if the chosen provider returns a transient error, routing walks down the ranked pool to the next provider automatically (up to `max_failover`). This uses the same ordering health produces, so failover prefers healthy providers first.
 
 **Prompt caching:** pass `cached_input_tokens` to price cache-hit input at each model's cache-read rate. `prices.json` models cache-read rates for Anthropic, Gemini, Mistral, DeepSeek, Grok and qwen-max, so on cache-heavy requests the cheapest provider can differ from the headline input-price ranking. OpenAI's cache rates are not published on its current pricing page and are omitted; OpenAI, Groq, qwen-flash and qwen-plus bill cached tokens at the full input rate, so they're never wrongly favoured.
@@ -467,9 +492,10 @@ them as unverified until the next sweep.
 - API keys are passed per-request and used only for that request
 - Keys are never stored, logged, or included in routing history
 - Request content is never stored or logged
-- History records contain only: timestamp, hashed session, provider, tier, token counts, cost, savings, latency, success/error class
+- History records contain only: timestamp, hashed session, provider, tier, token counts, cost, savings, latency, success/error class, and whether a failure was transient
 - The hosted server never uses keys of its own: provider key environment variables are ignored over HTTP
-- Unscoped history and spend reports show every session's records (as hashes); health is computed from that shared history
+- History and spend reports show only the caller's own records (a call without `session` sees only the shared `anon` session); an all-sessions view needs the operator opt-in `ARBITRAGE_ALLOW_GLOBAL_READS=1`
+- Health is computed internally from all sessions' history, counting only provider-side failures, with each session's contribution capped
 
 ---
 
@@ -555,7 +581,9 @@ How prices have changed over time — the citable, provenanced series. Parameter
 ### `pricing_observed`
 Compares the verified table with **observed** signals the router publishes (when
 `ARBITRAGE_EMIT_OBSERVED` is on): which model real completions used, at the unit
-price the router billed them at. Today the router emits the `prices.json` rate for
+price the router billed them at. Each observed point carries the table's model ID
+(so it matches `prices.json`), plus `served_model_id` when the provider reported a
+different one, such as a dated snapshot. Today the router emits the `prices.json` rate for
 that model, not a rate read from the provider's invoice, so this mainly catches a
 router running on a different table than the one served here. Reports
 `confirms` / `diverges` per point. Never changes a price.
