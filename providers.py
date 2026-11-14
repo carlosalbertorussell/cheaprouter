@@ -130,8 +130,9 @@ def configured_providers(user_keys: dict[str, str]) -> dict[str, ProviderConfig]
 from pricing_table import raw_table
 
 
-def _build_providers() -> dict[str, ProviderConfig]:
-    table = raw_table()
+def _build_providers(table: Optional[dict] = None) -> dict[str, ProviderConfig]:
+    """Build the registry from a price table (default: the validated prices.json)."""
+    table = raw_table() if table is None else table
     registry: dict[str, ProviderConfig] = {}
     for pid, p in table["providers"].items():
         models = {
