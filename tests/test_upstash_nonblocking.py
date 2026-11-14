@@ -178,16 +178,16 @@ def test_jsonl_writes_stay_inline(tmp_path, monkeypatch):
     assert (tmp_path / "h.jsonl").read_text().strip()
 
 
-def test_budget_status_reads_history_once(monkeypatch):
+def test_budget_status_reads_backend_once(monkeypatch):
     import history
     calls = []
-    def fake_read(scope, limit):
-        calls.append(scope)
-        return [{"provider_id": history._BUDGET_MARKER, "cost_usd": 10.0,
-                 "timestamp": "2000-01-01T00:00:00"}]
-    monkeypatch.setattr(history, "read_records", fake_read)
-    assert history.budget_status("me") is not None
-    assert len(calls) == 1
+    def fake_snapshot(scope, month, limit):
+        calls.append((scope, month))
+        return 10.0, 2.5
+    monkeypatch.setattr(history, "budget_snapshot", fake_snapshot)
+    st = history.budget_status("me")
+    assert st["monthly_budget_usd"] == 10.0 and st["used_pct"] == 25.0
+    assert calls == [(history.normalize_session("me"), history.month_key())]
 
 
 # ─── end to end: routing with a slow Upstash ─────────────────────────────────

@@ -97,9 +97,22 @@ class _FakeRedis:
     def __init__(self):
         self.lists = {}
         self.sets = {}
+        self.strings = {}
+        self.ttls = {}
 
     def run(self, args):
         cmd = args[0].upper()
+        if cmd == "GET":
+            return self.strings.get(args[1])
+        if cmd == "SET":
+            if "NX" in [str(a).upper() for a in args[3:]] and args[1] in self.strings:
+                return None
+            self.strings[args[1]] = str(args[2]); return "OK"
+        if cmd == "INCRBYFLOAT":
+            v = float(self.strings.get(args[1], 0)) + float(args[2])
+            self.strings[args[1]] = repr(v); return repr(v)
+        if cmd == "EXPIRE":
+            self.ttls[args[1]] = int(args[2]); return 1
         if cmd == "LPUSH":
             self.lists.setdefault(args[1], []).insert(0, args[2]); return len(self.lists[args[1]])
         if cmd == "LTRIM":
@@ -236,7 +249,8 @@ def test_upstash_write_issues_lpush_ltrim_sadd(mock_http):
     assert req.headers["authorization"] == f"Bearer {UPSTASH_TOKEN}"
     cmds = _commands(http)
     key = "history:s_abc"
-    assert [c[0] for c in cmds] == ["LPUSH", "LTRIM", "LPUSH", "LTRIM", "SADD"]
+    assert [c[0] for c in cmds] == ["LPUSH", "LTRIM", "LPUSH", "LTRIM", "SADD",
+                                    "INCRBYFLOAT", "EXPIRE"]          # + monthly spend (ST3)
     assert cmds[0][1] == key
     stored = json.loads(cmds[0][2])
     assert "api_key" not in stored and set(stored) <= ALLOWED_FIELDS
@@ -245,6 +259,9 @@ def test_upstash_write_issues_lpush_ltrim_sadd(mock_http):
     assert cmds[2] == ["LPUSH", "history:recent", cmds[0][2]]
     assert cmds[3] == ["LTRIM", "history:recent", 0, UpstashBackend.MAX_RECENT - 1]
     assert cmds[4] == ["SADD", "history:sessions", key]
+    spend_key = f"spend:s_abc:{stored['timestamp'][:7]}"
+    assert cmds[5] == ["INCRBYFLOAT", spend_key, stored["cost_usd"]]
+    assert cmds[6] == ["EXPIRE", spend_key, UpstashBackend.SPEND_TTL_S]
     # short default timeout (UPSTASH_TIMEOUT_S, 2s)
     assert http.timeouts == [2.0]
 
