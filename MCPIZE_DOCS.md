@@ -166,7 +166,7 @@ core tool — it selects the winner and makes the actual API call on your behalf
 | `estimated_output_tokens` | integer | — | 500 | Used for pre-flight cost routing |
 | `health_aware` | boolean | — | `true` | Deprioritize providers with recent provider-side failures (never excludes) |
 | `max_failover` | integer | — | 2 | On a transient error (429/5xx/timeout), how many further providers to try in ranked order. 0 disables. |
-| `cached_input_tokens` | integer | — | 0 | Of the input tokens, how many are expected cache hits. Priced at each model's cache-read rate where `prices.json` has one (Anthropic, Gemini, Mistral, DeepSeek, Grok, qwen-max), which can change the cheapest choice. |
+| `cached_input_tokens` | integer | — | 0 | Of the input tokens, how many are expected cache hits. Priced at each model's cache-read rate where `prices.json` has one (Anthropic, Gemini, Groq, Mistral, DeepSeek, Grok, qwen-max), which can change the cheapest choice. |
 | `stream` | boolean | — | `false` | Consume the provider's streaming endpoint. Lowers time-to-first-token (reported as `time_to_first_token_ms`); the full text still returns as one result. Failover applies only before the first token. Anthropic and OpenAI-compatible providers only; Gemini falls back to a normal call. |
 | `session` | string | — | `null` | Opaque token to attribute spend to (see Sessions below). Required for budget alerts |
 
@@ -449,7 +449,7 @@ Providers are selected using the following priority order:
 5. **Health** — when `health_aware: true` (default), providers whose recent success rate is at or below half are deprioritized: moved behind *all* healthy providers, whatever their price. They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. Health is scored on global history shared across users, counting only provider-side failures (never a caller's bad key or bad request), capping each session's contribution and needing failures from at least two sessions. `route_completion` reports any `deprioritized_providers` in its response.
 6. **Failover** — if the chosen provider returns a transient error, routing walks down the ranked pool to the next provider automatically (up to `max_failover`). This uses the same ordering health produces, so failover prefers healthy providers first.
 
-**Prompt caching:** pass `cached_input_tokens` to price cache-hit input at each model's cache-read rate. `prices.json` models cache-read rates for Anthropic, Gemini, Mistral, DeepSeek, Grok and qwen-max, so on cache-heavy requests the cheapest provider can differ from the headline input-price ranking. OpenAI's cache rates are not published on its current pricing page and are omitted; OpenAI, Groq, qwen-flash and qwen-plus bill cached tokens at the full input rate, so they're never wrongly favoured.
+**Prompt caching:** pass `cached_input_tokens` to price cache-hit input at each model's cache-read rate. `prices.json` models cache-read rates for Anthropic, Gemini, Groq, Mistral, DeepSeek, Grok and qwen-max, so on cache-heavy requests the cheapest provider can differ from the headline input-price ranking. OpenAI's cache rates are not published on its current pricing page and are omitted; OpenAI, qwen-flash and qwen-plus bill cached tokens at the full input rate, so they're never wrongly favoured.
 
 ---
 

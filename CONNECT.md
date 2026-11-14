@@ -81,5 +81,5 @@ or two and add more as you get accounts.
 | Groq | console.groq.com |
 | Mistral | console.mistral.ai |
 | DeepSeek | platform.deepseek.com |
-| Alibaba Qwen | dashscope.console.aliyun.com |
+| Alibaba Qwen | Alibaba Cloud Model Studio, **Singapore (international) region** key; China-region keys do not work on the Singapore endpoint. See https://www.alibabacloud.com/help/en/model-studio/base-url |
 | xAI Grok | console.x.ai |

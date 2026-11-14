@@ -226,10 +226,10 @@ the prices (`ARBITRAGE_ALLOW_STALE_PRICES=1` downgrades the refusal to a warning
 `python scripts/check_prices.py` reports the age; `arbitrage_check_price_drift`
 compares fetchable prices against the table but never edits it.
 
-Prompt caching: `prices.json` models a cache-read rate for Anthropic, Gemini,
+Prompt caching: `prices.json` models a cache-read rate for Anthropic, Gemini, Groq,
 Mistral, DeepSeek, Grok and qwen-max. OpenAI's cache rates are not published on its
-current pricing page, so they are omitted; OpenAI, Groq, qwen-flash and qwen-plus
-bill `cached_input_tokens` at the full input rate.
+current pricing page, so they are omitted; OpenAI, qwen-flash and qwen-plus bill
+`cached_input_tokens` at the full input rate.
 
 Groq and Qwen were re-read on 2026-11-14 (SC1d); the other six providers were
 last re-read on 2026-11-01, the table's `verified_at` (see `prices.json` notes). The pricing pages each provider is checked
