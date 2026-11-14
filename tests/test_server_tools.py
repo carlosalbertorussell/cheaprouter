@@ -20,7 +20,8 @@ def _log(pid, name, ok=True, session=None, cost=0.01):
     history.log_decision({"winner": {"provider_id": pid, "provider_name": name, "region": "us"},
                           "tier": "tier_fast", "savings": {"saved_usd": 0.001}},
                          session=session, actual_cost_usd=cost,
-                         error=None if ok else "RateLimitError: 429")
+                         error=None if ok else "RateLimitError: 429",
+                         transient=None if ok else True)
 
 
 # ─── arbitrage_get_pricing ────────────────────────────────────────────────────
@@ -148,17 +149,21 @@ def test_set_budget_tool(route_env):
 
 def test_provider_health_tool(route_env):
     s = route_env.server
-    for _ in range(4):
-        _log("groq", "Groq", ok=False)
+    for i in range(4):
+        _log("groq", "Groq", ok=False, session=f"user{i}")
     _log("openai", "OpenAI", ok=True)
     out = json.loads(_run(s.arbitrage_provider_health(s.ProviderHealthInput())))
-    assert out["providers"]["groq"] == {"score": 0.0, "samples": 4, "healthy": False}
+    assert out["providers"]["groq"] == {"score": 0.0, "samples": 4, "healthy": False,
+                                        "sessions": 4, "failing_sessions": 4}
     assert out["providers"]["openai"]["healthy"] is True
     assert out["unhealthy"] == ["groq"]
     import health
     assert out["thresholds"] == {"window": health.HEALTH_WINDOW,
                                  "min_samples": health.HEALTH_MIN_SAMPLES,
-                                 "unhealthy_at_success_rate_below_or_equal": health.HEALTH_THRESHOLD}
+                                 "unhealthy_at_success_rate_below_or_equal": health.HEALTH_THRESHOLD,
+                                 "max_per_session": health.HEALTH_MAX_PER_SESSION,
+                                 "min_failing_sessions": health.HEALTH_MIN_SESSIONS,
+                                 "scan_factor": health.HEALTH_SCAN_FACTOR}
     # a window of 1 only sees the newest record (openai)
     one = json.loads(_run(s.arbitrage_provider_health(s.ProviderHealthInput(window=1))))
     assert list(one["providers"]) == ["openai"] and one["thresholds"]["window"] == 1

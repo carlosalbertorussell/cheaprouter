@@ -52,8 +52,14 @@ def log_decision(
     actual_latency_ms: Optional[int] = None,
     actual_cost_usd: Optional[float] = None,
     error: Optional[str] = None,
+    transient: Optional[bool] = None,
 ) -> None:
-    """Persist one routing record via the active backend. Best-effort."""
+    """
+    Persist one routing record via the active backend. Best-effort.
+
+    `transient` classifies a failure (pass client.is_transient_error(exc)): only
+    transient, provider-side failures count against provider health (ST5).
+    """
     winner = (decision_dict or {}).get("winner") or {}
     savings = (decision_dict or {}).get("savings") or {}
 
@@ -70,6 +76,7 @@ def log_decision(
         latency_ms=actual_latency_ms,
         success=error is None,
         error=error,
+        transient=transient,
     )
     write_record(record)
 

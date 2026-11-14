@@ -134,7 +134,7 @@ class RouteCompletionInput(BaseModel):
     cached_input_tokens: int = Field(0, description=CACHE_DESC, ge=0, le=2_000_000)
     stream: bool = Field(False, description="Consume the provider's streaming endpoint (S5). Lowers time-to-first-token and reports it; the full text is still returned as one result at the end. Failover applies only before the first streamed token — a mid-stream error is terminal. Only Anthropic and OpenAI-compatible providers can stream; others fall back to a normal call.")
     session: Optional[str] = Field(None, description="Opaque session token to attribute spend to you. Reused across requests to track your own cumulative spend; never mapped to your identity.")
-    health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind all healthy providers whatever their price, but never excluded. Health is scored on the server's global history, shared across users. Set False for pure cheapest-first routing.")
+    health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind all healthy providers whatever their price, but never excluded. Health is scored on the server's global history, shared across users, counting only provider-side failures (429/5xx/timeouts/connection errors, never bad keys or bad requests), capping how much any one session contributes, and requiring failures from at least two sessions by default. Set False for pure cheapest-first routing.")
     max_failover: int = Field(2, description="On a transient error (429/5xx/timeout), how many additional providers to try, in ranked order, before giving up. 0 disables failover. Non-transient errors (bad key, bad request) never fail over.", ge=0, le=7)
 
     @field_validator("tier")
@@ -480,7 +480,8 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
     # Failover loop (S2): walk the ranked pool in order. On a transient error
     # (429/5xx/timeout) move to the next provider; on a non-transient error (bad
     # key/request) stop immediately since it would fail identically everywhere.
-    # Every failed attempt is logged as a failure, which feeds S8 health scoring.
+    # Every failed attempt is logged as a failure with its transient flag; only
+    # transient (provider-side) failures count against S8 health (ST5).
     ranked = decision.ranked_pool or [decision.winner.provider_id]
     max_attempts = 1 + max(0, params.max_failover)
     sequence = ranked[:max_attempts]
@@ -560,6 +561,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
                 session=params.session,
                 actual_cost_usd=0.0,
                 error=str(exc),
+                transient=transient,
             )
             if mid_stream:
                 # Tokens already streamed — failover is unsafe. Terminal.
@@ -832,10 +834,18 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
     Report recent health per provider, derived from routing history.
 
     For each provider seen in the recent window, returns its success rate, the
-    number of records scored, and whether it is currently healthy. A provider is
-    marked unhealthy only once it has enough recent samples and its success rate
-    has dropped to or below the threshold — at which point routing automatically
-    deprioritizes it (moves it behind healthy providers, without excluding it).
+    number of records scored, how many distinct sessions they came from, and
+    whether it is currently healthy. A provider is marked unhealthy only once it
+    has enough recent samples and its success rate has dropped to or below the
+    threshold — at which point routing automatically deprioritizes it (moves it
+    behind healthy providers, without excluding it).
+
+    Only provider-side failures count (429, 5xx, timeouts, connection errors).
+    Caller errors such as a bad key (401/403) or a bad request (400/404) are
+    ignored, each session contributes at most `max_per_session` records per
+    provider, and a provider is marked unhealthy only when failures come from at
+    least `min_failing_sessions` distinct sessions, so no single caller can make
+    a provider look unhealthy for others.
 
     Providers absent from the report have no recent history and are treated as
     healthy by the router.
@@ -845,10 +855,11 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
             - window (int, optional): How many recent records to score (default 50)
 
     Returns:
-        str: JSON mapping provider_id -> {score, samples, healthy}, plus the
-             thresholds in effect.
+        str: JSON mapping provider_id -> {score, samples, healthy, sessions,
+             failing_sessions}, plus the thresholds in effect.
     """
-    from health import HEALTH_MIN_SAMPLES, HEALTH_THRESHOLD, HEALTH_WINDOW
+    from health import (HEALTH_MAX_PER_SESSION, HEALTH_MIN_SAMPLES, HEALTH_MIN_SESSIONS,
+                        HEALTH_SCAN_FACTOR, HEALTH_THRESHOLD, HEALTH_WINDOW)
     snap = await asyncio.to_thread(provider_health, limit=params.window)
     unhealthy = [pid for pid, h in snap.items() if not h["healthy"]]
     return json.dumps({
@@ -858,7 +869,13 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
             "window": params.window or HEALTH_WINDOW,
             "min_samples": HEALTH_MIN_SAMPLES,
             "unhealthy_at_success_rate_below_or_equal": HEALTH_THRESHOLD,
+            "max_per_session": HEALTH_MAX_PER_SESSION,
+            "min_failing_sessions": HEALTH_MIN_SESSIONS,
+            "scan_factor": HEALTH_SCAN_FACTOR,
         },
+        "counts": "Successes and provider-side transient failures (429, 5xx, timeouts, "
+                  "connection errors). Caller errors (bad key, bad request) and "
+                  "unclassified pre-ST5 failures are ignored.",
         "note": "Unhealthy providers are deprioritized in routing, never excluded.",
     }, indent=2)
 

@@ -445,7 +445,9 @@ def test_route_completion_survives_upstash_outage(route_env, mock_http, monkeypa
     assert storage.flush_writes(timeout=5.0)                # the success write is backgrounded
     cmds = _commands(http)
     # health read (global recent list), the success write, and the budget read all hit Upstash
-    assert ["LRANGE", "history:recent", 0, 49] in cmds
+    import health
+    scan = health.HEALTH_WINDOW * health.HEALTH_SCAN_FACTOR
+    assert ["LRANGE", "history:recent", 0, scan - 1] in cmds
     assert any(c[0] == "LPUSH" for c in cmds)
     assert any(c[0] == "LRANGE" and c[1].startswith("history:s_") for c in cmds)
     assert "budget" not in out

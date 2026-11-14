@@ -13,8 +13,8 @@ Both implement the same StorageBackend interface so history.py never needs to
 know which is active. Self-hosters are never forced onto Upstash (Invariant C).
 
 PRIVACY (Invariants A & B): records carry only routing metadata — timestamp,
-provider, tier, region, token counts, cost, latency, savings, success flag, and
-an opaque session token. Never API keys, never message content. The record
+provider, tier, region, token counts, cost, latency, savings, success flag, a
+transient-failure flag, and an opaque session token. Never API keys, never message content. The record
 schema is enforced by build_record(); callers cannot inject arbitrary fields.
 """
 
@@ -51,6 +51,7 @@ ALLOWED_FIELDS = frozenset({
     "latency_ms",
     "success",
     "error_class",
+    "transient",
 })
 
 
@@ -68,6 +69,7 @@ def build_record(
     latency_ms: Optional[int],
     success: bool,
     error: Optional[str] = None,
+    transient: Optional[bool] = None,
 ) -> dict:
     """
     Build a privacy-clean history record. This is the ONLY way records are made.
@@ -75,6 +77,13 @@ def build_record(
     Note there is deliberately no field for message content or API keys. `error`
     is reduced to an error *class* (the exception type name), never the full
     message, since provider error bodies can echo request content.
+
+    `transient` (ST5) says whether a failure was provider-side and transient
+    (429, 5xx, timeout, connection error — classified by the caller with
+    client.is_transient_error). Health scoring counts only those failures, so a
+    caller's own bad key or bad request never counts against a provider. It is a
+    bare boolean: nothing about the caller or the request. Successes store
+    False; a failure the caller did not classify stores None (never counted).
     """
     error_class = None
     if error:
@@ -94,6 +103,7 @@ def build_record(
         "latency_ms": latency_ms,
         "success": success,
         "error_class": error_class,
+        "transient": False if success else (bool(transient) if transient is not None else None),
     }
 
 
