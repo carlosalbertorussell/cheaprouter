@@ -76,3 +76,26 @@ def test_protocols_valid():
 def test_get_provider():
     assert get_provider("grok").name == "xAI Grok"
     assert get_provider("nonexistent") is None
+
+
+def test_groq_off_models_shut_down_2026_08_16():
+    # SC1d: llama-3.1-8b-instant / llama-3.3-70b-versatile were shut down for
+    # free and developer accounts (console.groq.com/docs/deprecations).
+    ids = {m.model_id for m in PROVIDERS["groq"].models.values()}
+    assert ids == {"openai/gpt-oss-20b", "openai/gpt-oss-120b"}
+    fast = PROVIDERS["groq"].models["tier_fast"]
+    assert (fast.input_price_per_1m, fast.output_price_per_1m,
+            fast.cached_input_price_per_1m) == (0.075, 0.3, 0.037)
+    for tier in ("tier_balanced", "tier_powerful"):
+        m = PROVIDERS["groq"].models[tier]
+        assert (m.input_price_per_1m, m.output_price_per_1m,
+                m.cached_input_price_per_1m) == (0.15, 0.6, 0.075)
+        assert m.context_window == 131072
+
+
+def test_qwen_uses_singapore_endpoint():
+    # SC1d: the table encodes Singapore prices; dashscope-intl is the Singapore
+    # host, dashscope.aliyuncs.com is China (Beijing)
+    # (alibabacloud.com/help/en/model-studio/base-url). client.py appends
+    # /v1/chat/completions, giving the documented .../compatible-mode/v1 path.
+    assert PROVIDERS["qwen"].base_url == "https://dashscope-intl.aliyuncs.com/compatible-mode"

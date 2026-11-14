@@ -63,9 +63,9 @@ in the tier you ask for, so choose the tier your task needs and use
 
 | Tier | Best for | Example models |
 |------|----------|----------------|
-| `tier_fast` | Simple tasks, high volume, cost-sensitive | Haiku 5.5, GPT-6 Luna, Gemini 3.1 Flash-Lite, Llama 3.1 8B, Qwen Flash, DeepSeek Flash, Grok 4.3 |
-| `tier_balanced` | Most everyday tasks | Sonnet 5.5, GPT-6.1 Terra, Gemini 3.1 Flash-Lite, Llama 3.3 70B, Mistral Large 4, Qwen Plus, DeepSeek Flash, Grok 4.3 |
-| `tier_powerful` | Complex reasoning, long context | Opus 5.5, GPT-6.1 Sol, Gemini 3.1 Pro (preview), Llama 3.3 70B, Mistral Large 4, DeepSeek V4 Pro, Qwen Max, Grok 4.7 |
+| `tier_fast` | Simple tasks, high volume, cost-sensitive | Haiku 5.5, GPT-6 Luna, Gemini 3.1 Flash-Lite, GPT-OSS 20B (Groq), Qwen Flash, DeepSeek Flash, Grok 4.3 |
+| `tier_balanced` | Most everyday tasks | Sonnet 5.5, GPT-6.1 Terra, Gemini 3.1 Flash-Lite, GPT-OSS 120B (Groq), Mistral Large 4, Qwen Plus, DeepSeek Flash, Grok 4.3 |
+| `tier_powerful` | Complex reasoning, long context | Opus 5.5, GPT-6.1 Sol, Gemini 3.1 Pro (preview), GPT-OSS 120B (Groq), Mistral Large 4, DeepSeek V4 Pro, Qwen Max, Grok 4.7 |
 
 The fast tier also includes Mistral Small. Exact model IDs and prices are in
 `prices.json` and returned by `arbitrage_provider_status`.
@@ -475,15 +475,15 @@ the numbers in `prices.json`, and set `verified_at` to today's date.
 - Anthropic: anthropic.com/pricing
 - OpenAI: openai.com/pricing
 - Google Gemini: ai.google.dev/pricing
-- Groq: groq.com/pricing
+- Groq: console.groq.com/docs/models
 - Mistral: mistral.ai/technology
 - DeepSeek: api-docs.deepseek.com/quick_start/pricing
-- Alibaba Qwen: alibabacloud.com/help/en/model-studio/models
+- Alibaba Qwen: alibabacloud.com/help/en/model-studio/model-pricing
 - xAI Grok: docs.x.ai/docs/models
 
-These are the `pricing_urls` in `prices.json`. Groq and Qwen were carried, not
-re-read, at the 2026-11-01 verification (no priced page could be read); treat
-them as unverified until the next sweep.
+These are the `pricing_urls` in `prices.json`. Groq and Qwen were re-read on
+2026-11-14 (SC1d); the other six providers were last re-read on 2026-11-01, the
+table's `verified_at`.
 
 ---
 
@@ -508,8 +508,8 @@ excluded from routing. Start with one or two and add more as you get accounts.
 **Which providers give the best savings?**
 It depends on the tier and your keys. With every key supplied, no constraints and
 no cache, at 1,000 input / 500 output tokens the shipped table routes `tier_fast` to
-Groq llama-3.1-8b-instant, `tier_balanced` to DeepSeek deepseek-flash, and
-`tier_powerful` to Groq llama-3.3-70b-versatile. With `latency_sensitive: true`
+Groq openai/gpt-oss-20b, `tier_balanced` to Groq openai/gpt-oss-120b, and
+`tier_powerful` to Groq openai/gpt-oss-120b. `tier_balanced` is an exact tie with DeepSeek deepseek-flash (both 0.15/0.60); the sort is stable, so the provider listed first in `prices.json` (Groq) wins. With `latency_sensitive: true`
 DeepSeek and Qwen drop out and Groq wins all three tiers. Cache-heavy requests can
 favour DeepSeek or Anthropic. Run `arbitrage_estimate_cost` for your own volumes.
 

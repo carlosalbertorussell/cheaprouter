@@ -28,8 +28,8 @@ def test_get_includes_cache_when_present():
 
 
 def test_get_omits_cache_when_absent():
-    out = json.loads(_run(ps.pricing_get(ps.PricingGetInput(provider="groq", tier="tier_fast"))))
-    assert "cached_input_price_per_1m" not in out["price_per_1m_usd"]  # Groq has none
+    out = json.loads(_run(ps.pricing_get(ps.PricingGetInput(provider="qwen", tier="tier_fast"))))
+    assert "cached_input_price_per_1m" not in out["price_per_1m_usd"]  # qwen-flash cache not modelled
 
 
 def test_get_unknown_provider():
