@@ -7,6 +7,58 @@ One task per unit, PARTIAL-honest over DONE-false, closures noted inline.
 
 ## Active
 
+### ST3 — Budget storage and monthly spend
+
+**Goal:** a budget must never be lost and the month's spend must be right, however
+many calls a session makes. Fixes the bug found in ST1.
+
+**The bugs:** (1) a budget was a `__budget__` record inside the capped spend history,
+so after ~500 calls it fell out of the read window (and on Upstash LTRIM 0 4999
+eventually deleted it) — `route_completion` silently stopped sending budget alerts.
+(2) `budget_status` summed only the newest 500 records, so a session with more than
+500 calls this month had its spend undercounted. (3) Marker pollution: the marker
+reuses `cost_usd` for the budget amount, and `history_summary`, `spend_report` and
+`arbitrage_get_history` counted it — a $50 budget showed up as $50 of spend from
+provider `__budget__` (provider health already skipped it).
+
+**Delivered on this branch:**
+- **Budgets stored apart from history**, behind `get_budget` / `set_budget` /
+  `budget_snapshot` on the backend interface. Upstash: `budget:{session}` (one `SET`).
+  JSONL: a small JSON file next to the history file (`<history>.budgets.json`,
+  default under `/tmp`; override with `ARBITRAGE_BUDGET_FILE`), written atomically.
+- **Exact monthly spend.** Upstash: `INCRBYFLOAT spend:{session}:{YYYY-MM}` plus
+  `EXPIRE` (70 days) added to the existing single write pipeline; the month comes
+  from the record's timestamp. JSONL: a full scan filtered by session and month.
+  Semantics unchanged: every record counts by its `cost_usd`, including failed
+  attempts (`route_completion` logs those with their estimated cost).
+- **One read per `budget_status` on Upstash:** a single pipeline `GET budget`,
+  `GET spend counter`, `LRANGE` of the session's newest 500 records (no extra
+  request vs ST2). Writes stay in the ST2 background pipeline; everything stays
+  best-effort.
+- **Backward compatible.** With no dedicated budget, the newest legacy marker is
+  used (JSONL: anywhere in the file; Upstash: within the newest 500 records, then
+  migrated to `budget:{session}` with `SET NX`). For spend written before deploy
+  (no counter yet), Upstash takes the larger of the counter and the history-window
+  sum for the month.
+- **No more markers:** `set_budget` no longer writes into history, and
+  `read_history` filters legacy markers, so summaries, spend reports, get_history
+  and health never count them.
+- Tests first: `tests/test_budget.py` (40 tests, both backends) — the ST1 500-call
+  reproduction failed before the fix (21 of the new tests failed) and passes after;
+  >500 calls, list cap, month rollover, legacy fallback/override/migration,
+  pre-ST3 spend, request shape and counts, failures swallowed, marker pollution,
+  80% / over-budget alerts after 850–1200 calls. 380 tests pass (random order,
+  repeated); coverage 96.1%.
+
+**PARTIAL / not done:**
+- On Upstash, a legacy budget marker already beyond a session's newest 500 records
+  at deploy time is not recovered (it was already lost before ST3); the user has
+  to set the budget again.
+- In the deploy month, Upstash spend older than the newest 500 records and written
+  before the counter existed is not counted (the counter starts at deploy).
+- Failed attempts still count their estimated cost toward the budget (unchanged
+  behaviour, worth a product decision).
+
 ### ST2 — Upstash history off the routing path
 
 **Goal:** a slow or unreachable Upstash must never slow routing down. Before
@@ -47,7 +99,7 @@ network guard is removed. 340 tests pass (5 random-order seeds); coverage 96.4%.
 
 **PARTIAL / not done:**
 - The ST1 budget bug (the budget marker falls out of the 500-record read window)
-  is **unchanged**. It needs budgets stored outside the capped spend list.
+  was unchanged here. **Fixed in ST3.**
 - During the transition after deploy, an unscoped read (health scoring, global
   spend report) sees only `history:recent` once it has any records. Older
   per-session data stays readable per session, but drops out of global views
@@ -105,7 +157,7 @@ OpenRouter feed, and no coverage enforcement in CI.
 coverage 79% → 96.6% (`client.py` 29% → 98%, `server.py` 66% → 98%, `storage.py`
 86% → 100%, `tokens.py` 89% → 100%).
 
-**Bug found — NOT fixed (product change, out of scope):** budgets silently vanish.
+**Bug found — not fixed in ST1 (product change, out of scope); fixed in ST3:** budgets silently vanish.
 `get_budget`/`budget_status` only scan the newest 500 history records, so once a
 session routes ~500 calls after `set_budget`, the budget marker falls out of the
 window: `get_budget` returns None and `route_completion` stops sending
@@ -118,6 +170,7 @@ would fail); fix with the budget-storage change below.
 **PARTIAL / deferred:**
 - **Upstash non-blocking refactor:** done in ST2 (above), on the same branch.
 - Budget storage should move out of the capped spend list (fixes the bug above).
+  **Fixed in ST3.**
 - The key-leak guard holds because `build_record` and the attempt log keep only
   the text before the first `:` of an error, and httpx messages put `https:`
   before the key. It works, but by accident; a dedicated redaction step would be

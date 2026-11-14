@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **ST3 — budgets no longer vanish and monthly spend is exact.** A budget used to be a marker record inside the capped spend history, so after ~500 routed calls `route_completion` silently stopped sending budget alerts (on Upstash the marker was eventually trimmed away), and `budget_status` summed only the newest 500 records. Budgets now live apart from history (Upstash `budget:{session}`; JSONL a `<history>.budgets.json` file next to the history file, or `ARBITRAGE_BUDGET_FILE`), and the month's spend comes from a per-month `INCRBYFLOAT spend:{session}:{YYYY-MM}` counter in the existing write pipeline (Upstash, 70-day TTL) or a full scan (JSONL). Budgets set before this release still work (legacy marker fallback; migrated on Upstash). `history_summary`, `spend_report`, `arbitrage_get_history` no longer count a budget marker as spend from provider `__budget__`. `budget_status` is still one Upstash request.
+
 ### Changed
 - **ST2 — Upstash history no longer slows routing.** Each history write is one `/pipeline` request (was three), made on a background writer thread instead of inline on the event loop. Upstash timeout is now `UPSTASH_TIMEOUT_S` (default 2s, was 10s). A new capped `history:recent` list makes health scoring one request instead of one per session ever seen. `budget_status` reads once. `route()`, budget and history calls in the server run via `asyncio.to_thread`. Reads wait briefly for this process's pending writes, so read-after-write still holds. JSONL self-hosting is unchanged.
 

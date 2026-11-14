@@ -102,11 +102,57 @@ def sanitize(record: dict) -> dict:
     return {k: v for k, v in record.items() if k in ALLOWED_FIELDS}
 
 
+# ─── Budgets and monthly spend (ST3) ──────────────────────────────────────────
+#
+# Budgets are stored apart from the spend history (a dedicated key / file), so
+# they can never fall out of a read window or be trimmed with old records.
+# Before ST3 a budget was a history record with this sentinel provider_id that
+# reused cost_usd for the limit. New budgets are never written that way; legacy
+# markers are still honoured as a fallback and filtered out of analytics.
+
+BUDGET_MARKER = "__budget__"
+
+
+def is_budget_marker(record: dict) -> bool:
+    return (record or {}).get("provider_id") == BUDGET_MARKER
+
+
+def month_key(timestamp: Optional[str] = None) -> str:
+    """'YYYY-MM' of an ISO timestamp, or of now (UTC)."""
+    if timestamp:
+        return timestamp[:7]
+    return datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+def legacy_budget(records: list[dict]) -> Optional[float]:
+    """Newest pre-ST3 budget marker among records (newest first), or None."""
+    for r in records:
+        if is_budget_marker(r) and isinstance(r.get("cost_usd"), (int, float)):
+            return float(r["cost_usd"])
+    return None
+
+
+def month_spend_from(records: list[dict], month: str) -> float:
+    """Sum cost_usd of real spend records in `month` (budget markers excluded)."""
+    total = 0.0
+    for r in records:
+        if is_budget_marker(r):
+            continue
+        if (r.get("timestamp") or "").startswith(month):
+            total += r.get("cost_usd") or 0
+    return total
+
+
 # ─── Backend interface ────────────────────────────────────────────────────────
 
 class StorageBackend(Protocol):
     def write(self, record: dict) -> None: ...
     def read(self, session: Optional[str], limit: int) -> list[dict]: ...
+    def set_budget(self, session: str, monthly_usd: float) -> None: ...
+    def get_budget(self, session: str) -> Optional[float]: ...
+    def budget_snapshot(self, session: str, month: str, limit: int) -> tuple[Optional[float], float]:
+        """(budget or None, spend in `month`) for one session, in as few reads as possible."""
+        ...
     @property
     def name(self) -> str: ...
 
@@ -143,6 +189,53 @@ class JSONLBackend:
                 break
         return out
 
+    # ── budgets: a small JSON file next to the history file ──
+
+    @property
+    def budget_path(self) -> Path:
+        env = os.getenv("ARBITRAGE_BUDGET_FILE")
+        if env:
+            return Path(env)
+        return self.path.with_name(self.path.stem + ".budgets.json")
+
+    def _load_budgets(self) -> dict:
+        try:
+            data = json.loads(self.budget_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def set_budget(self, session: str, monthly_usd: float) -> None:
+        data = self._load_budgets()
+        data[session] = {"monthly_usd": float(monthly_usd),
+                         "set_at": datetime.now(timezone.utc).isoformat()}
+        path = self.budget_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, path)          # atomic: a reader never sees a half-written file
+
+    def _all_for(self, session: str) -> list[dict]:
+        # Full scan, newest first: exact however many records the session has.
+        return self.read(session, limit=10**12)
+
+    def _dedicated_budget(self, session: str) -> Optional[float]:
+        entry = self._load_budgets().get(session)
+        if isinstance(entry, dict) and isinstance(entry.get("monthly_usd"), (int, float)):
+            return float(entry["monthly_usd"])
+        return None
+
+    def get_budget(self, session: str) -> Optional[float]:
+        b = self._dedicated_budget(session)
+        return b if b is not None else legacy_budget(self._all_for(session))
+
+    def budget_snapshot(self, session: str, month: str, limit: int) -> tuple[Optional[float], float]:
+        records = self._all_for(session)
+        budget = self._dedicated_budget(session)
+        if budget is None:
+            budget = legacy_budget(records)
+        return budget, month_spend_from(records, month)
+
 
 # ─── Upstash Redis backend (durable serverless store) ─────────────────────────
 
@@ -169,6 +262,13 @@ class UpstashBackend:
       history:sessions    → Redis set of every session key seen. Only used as a
                             fallback for unscoped reads when history:recent is
                             empty (data written before it existed).
+      budget:{session}    → the session's monthly budget in USD (a string). Kept
+                            apart from the capped history lists so it is never
+                            trimmed or pushed out of a read window (ST3).
+      spend:{session}:{YYYY-MM}
+                          → running total of the session's spend that month,
+                            INCRBYFLOAT'd in the same write pipeline, expiring
+                            after SPEND_TTL_S. Exact however many calls are made.
 
     Session isolation is physical: each session's records live under a separate
     key, so a scoped read can only ever touch one session's list.
@@ -181,6 +281,7 @@ class UpstashBackend:
     MAX_RECENT = 5000        # cap on the global recent-records list
     RECENT_KEY = "history:recent"
     SESSIONS_KEY = "history:sessions"
+    SPEND_TTL_S = 70 * 86400  # monthly counters outlive their month by ~5 weeks
 
     def __init__(self, url: str, token: str):
         self.base = url.rstrip("/")
@@ -236,13 +337,71 @@ class UpstashBackend:
         payload = json.dumps(rec)
         # newest-first per-session list + global recent list, both capped, and
         # the session registered in the index — all in a single request.
-        self._pipeline(
+        commands = [
             ["LPUSH", key, payload],
             ["LTRIM", key, 0, self.MAX_PER_SESSION - 1],
             ["LPUSH", self.RECENT_KEY, payload],
             ["LTRIM", self.RECENT_KEY, 0, self.MAX_RECENT - 1],
             ["SADD", self.SESSIONS_KEY, key],
-        )
+        ]
+        # Monthly spend counter, in the same request (ST3). Budget markers are
+        # not spend; records without a cost add nothing.
+        cost = rec.get("cost_usd")
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool) and not is_budget_marker(rec):
+            spend_key = self._spend_key(session, month_key(rec.get("timestamp")))
+            commands += [["INCRBYFLOAT", spend_key, cost],
+                         ["EXPIRE", spend_key, self.SPEND_TTL_S]]
+        self._pipeline(*commands)
+
+    # ── budgets and monthly spend ──
+
+    @staticmethod
+    def _budget_key(session: str) -> str:
+        return f"budget:{session}"
+
+    @staticmethod
+    def _spend_key(session: str, month: str) -> str:
+        return f"spend:{session}:{month}"
+
+    @staticmethod
+    def _as_float(raw) -> Optional[float]:
+        try:
+            return float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def set_budget(self, session: str, monthly_usd: float) -> None:
+        self._cmd("SET", self._budget_key(session), float(monthly_usd))
+
+    def get_budget(self, session: str) -> Optional[float]:
+        budget, _, _ = self._budget_and_records(session, None, 500)
+        return budget
+
+    def _budget_and_records(self, session: str, month: Optional[str], limit: int):
+        """One pipelined request: dedicated budget, month counter, recent records."""
+        cmds = [["GET", self._budget_key(session)]]
+        if month:
+            cmds.append(["GET", self._spend_key(session, month)])
+        cmds.append(["LRANGE", f"history:{session}", 0, limit - 1])
+        results = self._pipeline(*cmds)
+        budget = self._as_float(results[0])
+        counter = self._as_float(results[1]) if month else None
+        records = self._decode(results[-1])
+        if budget is None:
+            budget = legacy_budget(records)
+            if budget is not None:
+                # Migrate a pre-ST3 marker so it survives the list being trimmed.
+                # NX: never overwrite a budget set concurrently. Best-effort.
+                self._cmd("SET", self._budget_key(session), budget, "NX")
+        return budget, counter, records
+
+    def budget_snapshot(self, session: str, month: str, limit: int) -> tuple[Optional[float], float]:
+        budget, counter, records = self._budget_and_records(session, month, limit)
+        # The counter is exact for spend written since ST3. In the month ST3 is
+        # deployed, older spend exists only in the history list, so take the
+        # larger of the two (they never double count: both are lower bounds).
+        spent = max(counter or 0.0, month_spend_from(records, month))
+        return budget, spent
 
     def read(self, session: Optional[str], limit: int) -> list[dict]:
         if session is not None:
@@ -363,9 +522,39 @@ def read_records(session: Optional[str], limit: int) -> list[dict]:
     Read recent records via the active backend. Waits briefly for this process's
     pending background writes first, so a read sees writes made just before it.
     """
+    _flush_pending()
+    return get_backend().read(session, limit)
+
+
+def _flush_pending() -> None:
     if _writer.pending():
         _writer.flush(timeout=_upstash_timeout() + 0.5)
-    return get_backend().read(session, limit)
+
+
+def save_budget(session: str, monthly_usd: float) -> None:
+    """Store a session's monthly budget apart from spend history. Best-effort."""
+    try:
+        get_backend().set_budget(session, monthly_usd)
+    except Exception:
+        pass
+
+
+def load_budget(session: str) -> Optional[float]:
+    """The session's budget (dedicated store, else a legacy marker), or None."""
+    _flush_pending()
+    try:
+        return get_backend().get_budget(session)
+    except Exception:
+        return None
+
+
+def budget_snapshot(session: str, month: str, limit: int = 500) -> tuple[Optional[float], float]:
+    """(budget or None, spend this month). Sees this process's pending writes."""
+    _flush_pending()
+    try:
+        return get_backend().budget_snapshot(session, month, limit)
+    except Exception:
+        return None, 0.0
 
 
 def flush_writes(timeout: Optional[float] = None) -> bool:

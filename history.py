@@ -17,7 +17,10 @@ import hashlib
 from collections import defaultdict
 from typing import Optional
 
-from storage import build_record, read_records, write_record
+from storage import (
+    BUDGET_MARKER, budget_snapshot, build_record, is_budget_marker, load_budget,
+    month_key, read_records, save_budget, write_record,
+)
 
 
 # ─── Session tokens ───────────────────────────────────────────────────────────
@@ -74,9 +77,13 @@ def log_decision(
 # ─── Reading ──────────────────────────────────────────────────────────────────
 
 def read_history(limit: int = 50, session: Optional[str] = None) -> list[dict]:
-    """Recent records, newest first, scoped to a session when given."""
+    """
+    Recent routing records, newest first, scoped to a session when given.
+    Legacy budget markers (pre-ST3 budgets stored as history records) are not
+    routing records and are filtered out, so analytics never count them.
+    """
     scope = normalize_session(session) if session is not None else None
-    return read_records(scope, limit)
+    return [r for r in read_records(scope, limit) if not is_budget_marker(r)]
 
 
 def history_summary(limit: int = 50, session: Optional[str] = None) -> dict:
@@ -153,63 +160,38 @@ def spend_report(
     }
 
 
-# ─── Budgets (S1.5) ───────────────────────────────────────────────────────────
+# ─── Budgets (S1.5, storage reworked in ST3) ──────────────────────────────────
 #
-# Budgets are stored in the same backend as ordinary spend records, tagged with
-# a sentinel provider_id so they round-trip through the identical clean schema.
-# A budget "record" reuses cost_usd to carry the limit. This keeps the store
-# single-table and avoids a second schema.
+# Budgets are stored apart from the spend history (Upstash `budget:{session}`,
+# or a small JSON file next to the JSONL history), so they never fall out of a
+# read window or get trimmed with old records. The month's spend comes from a
+# per-month counter (Upstash) or a full scan (JSONL), so it is correct however
+# many calls a session makes. Budgets set before ST3 were history records with
+# a sentinel provider_id; they are still honoured as a fallback.
 
-_BUDGET_MARKER = "__budget__"
+_BUDGET_MARKER = BUDGET_MARKER   # kept for callers/tests that referenced it
 
 
 def set_budget(session: Optional[str], monthly_usd: float) -> dict:
     """Record a monthly budget for a session. Returns the stored budget."""
-    from storage import build_record as _br
-    rec = _br(
-        session=normalize_session(session),
-        provider_id=_BUDGET_MARKER,
-        provider_name=None, region=None, tier=None,
-        input_tokens=None, output_tokens=None,
-        cost_usd=float(monthly_usd), saved_usd=None,
-        latency_ms=None, success=True,
-    )
-    write_record(rec)
+    save_budget(normalize_session(session), float(monthly_usd))
     return {"session_scoped": True, "monthly_budget_usd": round(float(monthly_usd), 2)}
-
-
-def _budget_from(records: list[dict]) -> Optional[float]:
-    """Most recent budget among records (newest first), or None."""
-    for r in records:
-        if r.get("provider_id") == _BUDGET_MARKER:
-            return r.get("cost_usd")
-    return None
 
 
 def get_budget(session: Optional[str], limit: int = 500) -> Optional[float]:
     """Most recent budget set for this session, or None."""
-    return _budget_from(read_history(limit, session))
+    return load_budget(normalize_session(session))
 
 
 def budget_status(session: Optional[str], limit: int = 500) -> Optional[dict]:
     """
     Current month spend vs. budget for a session. None if no budget is set.
-    Real spend excludes budget-marker records. One read serves both the budget
-    lookup and the spend sum.
+    One backend read serves both the budget lookup and the month's spend.
+    `limit` bounds the history window used only for pre-ST3 data on Upstash.
     """
-    records = read_history(limit, session)
-    budget = _budget_from(records)
+    budget, spent = budget_snapshot(normalize_session(session), month_key(), limit)
     if budget is None:
         return None
-
-    from datetime import datetime, timezone
-    month_prefix = datetime.now(timezone.utc).strftime("%Y-%m")
-    spent = 0.0
-    for r in records:
-        if r.get("provider_id") == _BUDGET_MARKER:
-            continue
-        if (r.get("timestamp") or "").startswith(month_prefix):
-            spent += r.get("cost_usd") or 0
 
     pct = (spent / budget * 100) if budget > 0 else 0.0
     return {
