@@ -5,15 +5,28 @@ Records go through a pluggable storage backend (storage.py): Upstash Redis when
 configured, JSONL otherwise. Every record is privacy-clean by construction —
 routing metadata only, never keys, never message content (Invariant A).
 
-Session attribution (S1.3): callers pass an opaque `session` token. Reads and
-spend reports are scoped to that token, so one user cannot see another's spend
-(Invariant B). The server never maps a session to an identity — it is just an
-opaque grouping key the caller supplies.
+Session attribution (S1.3): callers pass an opaque `session` token, stored only
+as a hash. The server never maps a session to an identity — it is just an opaque
+grouping key the caller supplies.
+
+Read scoping (Invariant B, enforced at the tool layer since ST5): the
+caller-facing history and spend tools read only the caller's own records. A call
+with a `session` token reads that token's records; a call without one reads the
+shared "anon" session's records, never everyone's. A global, all-sessions view
+exists only when the operator sets ARBITRAGE_ALLOW_GLOBAL_READS=1 (see
+caller_scope). Note that "anon" is shared by every caller who omits a token, so
+those callers can see each other's anon records; a private view needs a token.
+
+The functions below take `session=None` to mean *unscoped* (every session).
+That is for internal, server-side aggregates such as health scoring (health.py)
+and tests; tool code must resolve the caller's scope with caller_scope() and
+pass the resulting `key`.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 from collections import defaultdict
 from typing import Optional
 
@@ -40,6 +53,44 @@ def normalize_session(session: Optional[str]) -> str:
     if not session:
         return DEFAULT_SESSION
     return "s_" + hashlib.sha256(session.encode("utf-8")).hexdigest()[:16]
+
+
+# ─── Caller read scope (ST5) ──────────────────────────────────────────────────
+
+GLOBAL_READS_ENV = "ARBITRAGE_ALLOW_GLOBAL_READS"
+SCOPE_SESSION = "session"          # the caller's own token
+SCOPE_ANON = "anon"                # no token: the shared anon session
+SCOPE_ALL = "all_sessions"         # operator opt-in only
+
+
+def global_reads_allowed() -> bool:
+    """True only when the operator explicitly opted in to all-sessions reads."""
+    return os.getenv(GLOBAL_READS_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
+def caller_scope(session: Optional[str]) -> tuple[Optional[str], str]:
+    """
+    The storage key a tool caller may read, and a label for it.
+
+    Returns (key, scope): key is a normalized session key, or None for an
+    unscoped all-sessions read — which happens only when no session was passed
+    AND the operator set ARBITRAGE_ALLOW_GLOBAL_READS=1. Otherwise a missing
+    session reads the "anon" session, never everyone's records.
+    """
+    if session:
+        return normalize_session(session), SCOPE_SESSION
+    if global_reads_allowed():
+        return None, SCOPE_ALL
+    return DEFAULT_SESSION, SCOPE_ANON
+
+
+_UNSET = object()
+
+
+def _resolve_key(session: Optional[str], key) -> Optional[str]:
+    if key is not _UNSET:
+        return key                 # already resolved (caller_scope); None = all
+    return normalize_session(session) if session is not None else None
 
 
 # ─── Writing ──────────────────────────────────────────────────────────────────
@@ -83,19 +134,21 @@ def log_decision(
 
 # ─── Reading ──────────────────────────────────────────────────────────────────
 
-def read_history(limit: int = 50, session: Optional[str] = None) -> list[dict]:
+def read_history(limit: int = 50, session: Optional[str] = None, *, key=_UNSET) -> list[dict]:
     """
     Recent routing records, newest first, scoped to a session when given.
+    `session=None` reads every session (internal use only, see module doc);
+    `key` takes an already-resolved storage key from caller_scope() instead.
     Legacy budget markers (pre-ST3 budgets stored as history records) are not
     routing records and are filtered out, so analytics never count them.
     """
-    scope = normalize_session(session) if session is not None else None
+    scope = _resolve_key(session, key)
     return [r for r in read_records(scope, limit) if not is_budget_marker(r)]
 
 
-def history_summary(limit: int = 50, session: Optional[str] = None) -> dict:
+def history_summary(limit: int = 50, session: Optional[str] = None, *, key=_UNSET) -> dict:
     """Aggregate stats over recent records (optionally session-scoped)."""
-    records = read_history(limit, session)
+    records = read_history(limit, session, key=key)
     if not records:
         return {"total_records": 0, "message": "No history found."}
 
@@ -129,12 +182,14 @@ def spend_report(
     session: Optional[str] = None,
     limit: int = 500,
     since: Optional[str] = None,
+    *,
+    key=_UNSET,
 ) -> dict:
     """
     Spend broken down by provider, by tier, and by day, with total saved vs.
     baseline. `since` is an ISO date/datetime string; records older are excluded.
     """
-    records = read_history(limit, session)
+    records = read_history(limit, session, key=key)
     if since:
         records = [r for r in records if (r.get("timestamp") or "") >= since]
     if not records:

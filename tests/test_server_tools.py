@@ -104,7 +104,7 @@ def test_provider_status_unknown_provider(route_env):
 def test_get_history_empty(route_env):
     s = route_env.server
     out = json.loads(_run(s.arbitrage_get_history(s.GetHistoryInput())))
-    assert out == {"message": "No routing history found.", "records": []}
+    assert out == {"message": "No routing history found.", "records": [], "scope": "anon"}
 
 
 def test_get_history_records_summary_and_scope(route_env):
@@ -116,11 +116,14 @@ def test_get_history_records_summary_and_scope(route_env):
     assert [r["provider_id"] for r in out["records"]] == ["openai", "groq"]   # newest first
     assert out["summary"]["total_records"] == 2
     assert out["summary"]["successful"] == 1 and out["summary"]["failed"] == 1
-    glob = json.loads(_run(s.arbitrage_get_history(s.GetHistoryInput(limit=2))))
-    assert len(glob["records"]) == 2                     # limit honoured
-    summ = json.loads(_run(s.arbitrage_get_history(s.GetHistoryInput(summary_only=True))))
-    assert summ["total_records"] == 3 and "records" not in summ
-    assert summ["provider_usage"] == {"groq": 2, "openai": 1}
+    assert out["scope"] == "session"
+    one = json.loads(_run(s.arbitrage_get_history(s.GetHistoryInput(session="ann", limit=1))))
+    assert len(one["records"]) == 1                      # limit honoured
+    summ = json.loads(_run(s.arbitrage_get_history(s.GetHistoryInput(session="ann",
+                                                                     summary_only=True))))
+    assert summ["total_records"] == 2 and "records" not in summ
+    assert summ["provider_usage"] == {"groq": 1, "openai": 1}
+    assert summ["scope"] == "session"
 
 
 def test_spend_report_tool(route_env):
@@ -132,9 +135,10 @@ def test_spend_report_tool(route_env):
     assert out["spend_by_provider"] == {"Groq": 0.25, "OpenAI": 0.5}
     assert out["spend_by_tier"] == {"tier_fast": 0.75}
     assert list(out["spend_by_day"].values()) == [0.75]
+    assert out["scope"] == "session"
     future = json.loads(_run(s.arbitrage_spend_report(s.SpendReportInput(session="ann",
                                                                          since="2999-01-01"))))
-    assert future == {"total_records": 0, "message": "No spend in range."}
+    assert future == {"total_records": 0, "message": "No spend in range.", "scope": "session"}
 
 
 def test_set_budget_tool(route_env):
