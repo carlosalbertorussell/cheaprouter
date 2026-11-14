@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **ST2 — Upstash history no longer slows routing.** Each history write is one `/pipeline` request (was three), made on a background writer thread instead of inline on the event loop. Upstash timeout is now `UPSTASH_TIMEOUT_S` (default 2s, was 10s). A new capped `history:recent` list makes health scoring one request instead of one per session ever seen. `budget_status` reads once. `route()`, budget and history calls in the server run via `asyncio.to_thread`. Reads wait briefly for this process's pending writes, so read-after-write still holds. JSONL self-hosting is unchanged.
+
 ### Added
 - **ST1 — regression test coverage.** 184 → 329 tests; source coverage 79% → 96.6% (`client.py` 29% → 98%, `server.py` 66% → 98%). New tests for the provider adapters (request shape, parsing, errors) and the real streaming parsers / `_run_streaming` over `httpx.MockTransport`; end-to-end key-leak checks (Gemini 429, ConnectError failover); hand-computed costs, savings and the cached-input split; failover history attribution; budget alerts; every MCP tool plus input validation; the Upstash REST layer and outage handling; token-counting fallbacks. An autouse guard fails any test that opens a real network connection. CI now compiles every module and enforces `--cov-fail-under=92`. Tests and CI only — no product-code change.
 

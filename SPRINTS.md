@@ -7,6 +7,54 @@ One task per unit, PARTIAL-honest over DONE-false, closures noted inline.
 
 ## Active
 
+### ST2 — Upstash history off the routing path
+
+**Goal:** a slow or unreachable Upstash must never slow routing down. Before
+this, every routed call made its Upstash requests one after another, inline on
+the async event loop, each with a 10s timeout: an unscoped health read (one
+`SMEMBERS` plus one `LRANGE` per session ever seen, so it grew without bound),
+three requests per history write (per failover attempt), and two budget reads.
+A healthy Upstash added a few hundred ms per call; an unreachable one could stall
+a call, and every other request on the server, for minutes.
+
+**Delivered on this branch (after ST1, so its tests guard the change):**
+- **One request per write.** `UpstashBackend.write` sends a single `/pipeline`
+  request (per-session LPUSH + LTRIM, global LPUSH + LTRIM, SADD).
+- **Short timeout.** `UPSTASH_TIMEOUT_S`, default 2s (was a hard-coded 10s).
+- **Background writes.** Upstash writes go through one daemon writer thread
+  (bounded queue, in order, drops on overflow rather than blocking). The backend
+  is resolved on the caller's thread, so a write always goes where it was
+  configured at call time. Reads first wait briefly for this process's pending
+  writes, so read-after-write still holds. JSONL stays inline (a fast local
+  append). `storage.flush_writes()` drains the queue; it runs at exit and after
+  every test.
+- **Bounded unscoped reads.** New capped `history:recent` list (5000): health
+  scoring and unscoped history are one `LRANGE`, however many sessions exist. Data
+  written before the list existed is still read through a pipelined fan-out
+  (2 requests) until `history:recent` has records.
+- **`budget_status` reads once** instead of twice.
+- **Event loop never blocked.** `route()` (health read), budget and history calls
+  in `server.py` run via `asyncio.to_thread`.
+
+**Tests:** `tests/test_upstash_nonblocking.py` (request count with 20 sessions,
+timeouts and the env override, a write returning before a slow Upstash,
+read-after-write, write ordering, queue overflow dropping instead of blocking,
+JSONL staying inline, single-read budgets, and an end-to-end check that the event
+loop is never stalled for more than 200ms while every Upstash request takes
+300ms). ST1's Upstash tests updated to the pipelined contract; its fake REST server
+now speaks `/pipeline`. An autouse fixture drains background writes before the
+network guard is removed. 340 tests pass (5 random-order seeds); coverage 96.4%.
+
+**PARTIAL / not done:**
+- The ST1 budget bug (the budget marker falls out of the 500-record read window)
+  is **unchanged**. It needs budgets stored outside the capped spend list.
+- During the transition after deploy, an unscoped read (health scoring, global
+  spend report) sees only `history:recent` once it has any records. Older
+  per-session data stays readable per session, but drops out of global views
+  until the recent list fills.
+- Health snapshots are not cached. With one request per check, caching wasn't
+  needed.
+
 ### ST1 — Regression test coverage
 
 **Goal:** make the test suite catch regressions in the paths users actually depend
@@ -68,13 +116,7 @@ the marker outright. Repro: `set_budget('u', 1.0)`, then 500 ×
 would fail); fix with the budget-storage change below.
 
 **PARTIAL / deferred:**
-- **Upstash non-blocking refactor (follow-up, not started):** non-blocking history
-  writes, a 1-2s Upstash timeout, one `/pipeline` request per write, a cached
-  health snapshot, single-read `budget_status`. The new tests pin *current*
-  behaviour; the read-after-write tests (`test_health`, `test_analytics`,
-  `test_route_completion`, `test_failover::test_deprioritized_provider_last_in_pool`)
-  will need a flush/drain hook once writes go async, and the
-  LPUSH/LTRIM/SADD sequence test will need updating for the pipeline.
+- **Upstash non-blocking refactor:** done in ST2 (above), on the same branch.
 - Budget storage should move out of the capped spend list (fixes the bug above).
 - The key-leak guard holds because `build_record` and the attempt log keep only
   the text before the first `:` of an error, and httpx messages put `https:`
