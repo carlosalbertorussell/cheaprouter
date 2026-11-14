@@ -22,13 +22,24 @@ def test_resolve_key_prefers_user_keys():
     assert key == "user-key"
 
 
-def test_resolve_key_falls_back_to_env(monkeypatch):
+def test_resolve_key_ignores_env_by_default(monkeypatch):
+    # Default (HTTP / hosted): operator env keys never stand in for the caller's.
+    import providers
+    monkeypatch.setattr(providers, "_local_transport", False)
+    monkeypatch.delenv("ARBITRAGE_ALLOW_ENV_KEYS", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "env-key")
+    assert resolve_api_key("groq", {}) is None
+
+
+def test_resolve_key_falls_back_to_env_when_allowed(monkeypatch):
+    monkeypatch.setenv("ARBITRAGE_ALLOW_ENV_KEYS", "1")
     monkeypatch.setenv("GROQ_API_KEY", "env-key")
     key = resolve_api_key("groq", {})
     assert key == "env-key"
 
 
 def test_resolve_key_user_overrides_env(monkeypatch):
+    monkeypatch.setenv("ARBITRAGE_ALLOW_ENV_KEYS", "1")
     monkeypatch.setenv("GROQ_API_KEY", "env-key")
     key = resolve_api_key("groq", {"groq": "user-key"})
     assert key == "user-key"

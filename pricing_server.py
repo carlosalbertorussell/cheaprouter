@@ -247,13 +247,14 @@ async def pricing_history(params: PricingHistoryInput) -> str:
 )
 async def pricing_observed(params: PricingObservedInput) -> str:
     """
-    Validate the verified table against OBSERVED signals — what real completions
-    actually cost, published by the router across the shared spine (SP1d).
+    Compare the verified table with OBSERVED signals the router publishes across
+    the shared spine (SP1d, opt-in via ARBITRAGE_EMIT_OBSERVED): which model real
+    completions used, at the unit price the router billed them at.
 
-    Observed cost that matches the verified price is a confidence signal; observed
-    cost that materially diverges is a 're-verify' trigger — stronger than a feed
-    comparison because it's real spend. This NEVER changes a price: observed data
-    challenges the verified tier, it does not promote into it.
+    Today the router emits the prices.json rate for the model that answered, not
+    a rate read from the provider's invoice, so a divergence mainly means the
+    router ran on a different table than this one. This NEVER changes a price:
+    observed data challenges the verified tier, it does not promote into it.
 
     Args:
         params (PricingObservedInput): max observed records to validate.

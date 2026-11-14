@@ -1,5 +1,11 @@
 # cheaprouter — Forward Pipeline
 
+> **Superseded (2026-11-14).** This overview was last updated on 2026-09-05 and is
+> kept for its sequencing rationale only. Its status lines are out of date: SC1
+> landed (prices re-verified, most recently on 2026-11-01), so the deployed server
+> routes; and the pricing server (SP1a–SP1d) is built and ships 5 `pricing_*`
+> tools. For current status see **[SPRINTS.md](SPRINTS.md)**.
+
 One-page map of what's shipped, what's next, and in what order. `SPRINTS.md` is
 the live per-sprint log (scope, closures, test counts) and remains the source of
 truth for detail; this document is the narrative overview and sequencing rationale.
@@ -8,7 +14,7 @@ _Last updated: 2026-09-05._
 
 ## The one thing gating everything
 
-**The deployed server refuses to route until prices are re-verified.** The S4a
+**(Historical, 2026-09-05 — resolved by SC1.)** The deployed server refused to route until prices were re-verified. The S4a
 staleness guard is live and the price table is ~432 days old, so on deploy
 `arbitrage_route_completion` and `arbitrage_estimate_cost` refuse. Every feature
 below is built or buildable, but the live server can't exercise any of it until
@@ -140,8 +146,8 @@ pricing truth; the rigor cheaprouter already has (provenance, staleness guard,
 no-invented-prices) is the methodology a reference source needs. Full design in
 **`PRICING_SERVER_BLUEPRINT.md`**; build sequence SP1a–SP1e. Introduces a third
 provenance tier (**observed**, from real routing) and price-history tracking —
-the citable series no scraper keeps well. Docs-first; nothing built until the
-blueprint is reviewed.
+the citable series no scraper keeps well. Docs-first at the time; SP1a–SP1d have since
+been built (see SPRINTS.md).
 
 ## Beyond the current roadmap (not yet sprints)
 

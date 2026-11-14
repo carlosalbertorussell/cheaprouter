@@ -9,9 +9,10 @@ An MCP server that routes LLM completion requests to the cheapest available prov
 selecting dynamically based on token price, region, latency, and availability.
 
 **BYOK** — bring your own provider keys, passed per request. cheaprouter holds no
-credentials and stores no content.
+provider credentials, stores no content, and a hosted server never falls back to
+the operator's keys.
 
-**Docs:** [CONNECT](CONNECT.md) · [MCPize tool reference](MCPIZE_DOCS.md) · [Architecture](ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Pipeline](PIPELINE.md) · [Pricing blueprint](PRICING_SERVER_BLUEPRINT.md) · [Pricing strategy](PRICING_STRATEGY.md) · [Ticker vision](TICKER_VISION.md) · [Roadmap](SPRINTS.md) · [Review response](REVIEW_RESPONSE.md)
+**Docs:** [CONNECT](CONNECT.md) · [MCPize tool reference](MCPIZE_DOCS.md) · [Architecture](ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Pipeline (superseded)](PIPELINE.md) · [Pricing blueprint](PRICING_SERVER_BLUEPRINT.md) · [Pricing strategy](PRICING_STRATEGY.md) · [Ticker vision](TICKER_VISION.md) · [Roadmap](SPRINTS.md) · [Review response](REVIEW_RESPONSE.md)
 
 ## Connect
 
@@ -23,13 +24,13 @@ npx -y mcpize connect @crussell/cheaprouter --client claude
 
 Per client:
 
-- **Claude:** `claude mcp add --transport http CheapRouter https://cheaprouter.mcpize.run`
-- **Cursor:** `cursor mcp add CheapRouter https://cheaprouter.mcpize.run`
-- **Windsurf:** `windsurf mcp add CheapRouter https://cheaprouter.mcpize.run`
-- **Cline:** `cline mcp add CheapRouter https://cheaprouter.mcpize.run`
+- **Claude Code:** `claude mcp add --transport http CheapRouter https://cheaprouter.mcpize.run/mcp`
+- **Claude.ai:** Settings → Connectors → Add custom connector → `https://cheaprouter.mcpize.run/mcp`
+- **Cursor:** `cursor mcp add CheapRouter https://cheaprouter.mcpize.run/mcp`
+- **Windsurf:** `windsurf mcp add CheapRouter https://cheaprouter.mcpize.run/mcp`
+- **Cline:** `cline mcp add CheapRouter https://cheaprouter.mcpize.run/mcp`
 
-Direct MCP endpoint (streamable-http), for a manual client config:
-`https://cheaprouter.mcpize.run/mcp`
+The MCP endpoint (streamable HTTP) is `https://cheaprouter.mcpize.run/mcp`.
 
 > Hosted access currently requires a free MCPize account (OAuth sign-in). The code
 > is MIT, so you can also run your own instance for open, no-account access.
@@ -58,24 +59,29 @@ git clone <repo>
 cd cheaprouter
 pip install -r requirements.txt
 cp .env.example .env
-# edit .env — add API keys for the providers you want to use
+# optional: provider keys in .env are used only over stdio (see Running)
 ```
 
-The server works with any subset of providers. Unconfigured providers (no API key)
-are silently excluded from routing.
+The server works with any subset of providers. Providers without a key are
+excluded from routing, with the reason shown in `excluded`.
 
 ## Running
 
 **HTTP — default (MCPize cloud / remote clients):**
 ```bash
 python server.py
-# Listens on port 8000
+# streamable HTTP on $PORT (default 8081), endpoint /mcp
 ```
+Over HTTP only the keys a caller passes in `api_keys` count. Provider key env
+vars are ignored, so a hosted server never spends the operator's keys. Set
+`ARBITRAGE_ALLOW_ENV_KEYS=1` only for a private deployment you protect yourself.
 
 **stdio — local only (Claude Desktop / local MCP clients):**
 ```bash
 python server.py --stdio
 ```
+Over stdio, provider env vars (`ANTHROPIC_API_KEY`, ...) fill in for providers the
+caller leaves out of `api_keys`. A key passed in `api_keys` always wins.
 
 ## Deploy to MCPize
 
@@ -87,14 +93,16 @@ mcpize login
 mcpize deploy
 ```
 
-No secrets to configure — cheaprouter is BYOK. Users supply their own provider
-keys per request in the `api_keys` parameter; the server holds no credentials.
-MCPize handles hosting, SSL, and scaling, giving you a public HTTPS endpoint you
-can connect to from Claude.ai or any MCP-compatible client. See [CONNECT.md](CONNECT.md).
+No provider secrets to configure — cheaprouter is BYOK. Users supply their own
+provider keys per request in the `api_keys` parameter. Do not set provider keys as
+MCPize secrets: the HTTP server ignores them. MCPize handles hosting, SSL, and
+scaling, giving you a public HTTPS endpoint you can connect to from Claude.ai or
+any MCP-compatible client. See [CONNECT.md](CONNECT.md).
 
-> **Note on history:** The routing history file lives at `/tmp/routing_history.jsonl`
-> on MCPize and resets on each redeploy. For persistent spend tracking, override
-> `ARBITRAGE_HISTORY_FILE` to an external path or pipe logs to a storage service.
+> **Note on history:** with `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`
+> set, routing history is durable across redeploys ([setup](docs/upstash-setup.md)).
+> Without them it falls back to a JSONL file (`ARBITRAGE_HISTORY_FILE`, default
+> `/tmp/routing_history.jsonl`), which resets on each MCPize redeploy.
 
 ## Claude Desktop config (local stdio)
 
@@ -103,7 +111,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "token-arbitrage": {
+    "cheaprouter": {
       "command": "python",
       "args": ["/path/to/cheaprouter/server.py", "--stdio"],
       "env": {
@@ -119,46 +127,69 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ## Tools
 
+The router (`server.py`) registers 10 tools. Defaults in brackets; **bold** means
+required.
+
+| Tool | Parameters |
+|------|------------|
+| `arbitrage_get_pricing` | **`tier`**, `input_tokens` [1000], `output_tokens` [500], `cached_input_tokens` [0], `api_keys` [{}] |
+| `arbitrage_estimate_cost` | **`tier`**, **`input_tokens`**, **`output_tokens`**, `cached_input_tokens` [0], `api_keys` [{}], `latency_sensitive` [false], `excluded_providers` [[]], `allowed_regions` [null] |
+| `arbitrage_route_completion` | **`messages`**, **`api_keys`**, `tier` [tier_fast], `system_prompt` [null], `max_tokens` [2048], `latency_sensitive` [false], `excluded_providers` [[]], `allowed_regions` [null], `estimated_output_tokens` [500], `cached_input_tokens` [0], `stream` [false], `session` [null], `health_aware` [true], `max_failover` [2] |
+| `arbitrage_provider_status` | `provider_id` [null = all], `api_keys` [{}] |
+| `arbitrage_get_history` | `limit` [20, max 100], `summary_only` [false], `session` [null] |
+| `arbitrage_spend_report` | `session` [null], `limit` [500, max 2000], `since` [null] |
+| `arbitrage_set_budget` | **`session`**, **`monthly_usd`** |
+| `arbitrage_provider_health` | `window` [50] |
+| `arbitrage_count_tokens` | **`messages`**, `system_prompt` [null] |
+| `arbitrage_check_price_drift` | `propose` [false] |
+
+Full reference with return shapes: [MCPIZE_DOCS.md](MCPIZE_DOCS.md).
+
 ### `arbitrage_get_pricing`
-Full price comparison table for a tier + token volume.
 ```json
 { "tier": "tier_balanced", "input_tokens": 5000, "output_tokens": 1000 }
 ```
 
 ### `arbitrage_estimate_cost`
-Pre-flight routing decision without executing the request.
 ```json
 {
   "tier": "tier_fast",
   "input_tokens": 2000,
   "output_tokens": 500,
-  "latency_sensitive": false,
+  "api_keys": { "groq": "gsk_...", "deepseek": "sk-..." },
   "excluded_providers": ["openai"]
 }
 ```
 
 ### `arbitrage_route_completion`
-Route and execute a completion on the cheapest eligible provider.
 ```json
 {
   "messages": [{"role": "user", "content": "Summarise this in one sentence."}],
   "tier": "tier_fast",
+  "api_keys": { "groq": "gsk_...", "openai": "sk-..." },
   "latency_sensitive": false,
   "estimated_output_tokens": 100
 }
 ```
+The response's `cost.actual_cost_usd` prices the tokens the provider reported,
+with the cache-read rate applied to `cached_input_tokens`. `cost.savings` compares
+the provider that answered (after any failover) with the most expensive eligible
+provider (`savings.vs_provider_id`), both priced at the actual token counts.
+`cost.estimated_savings` is the pre-flight figure for the routed winner.
 
-### `arbitrage_provider_status`
-Check which providers are configured and their model/price details.
-```json
-{ "provider_id": "deepseek" }
-```
+### The pricing server
 
-### `arbitrage_get_history`
-Past routing decisions with spend and savings tracking.
-```json
-{ "limit": 50, "summary_only": true }
-```
+A second MCP server, `pricing_server.py` (CheapRouter Pricing, deployed via
+`mcpize.pricing.yaml`, default port 8082), serves the verified price table with
+provenance. It does no routing and needs no keys. Its 5 tools:
+
+| Tool | Parameters |
+|------|------------|
+| `pricing_get` | **`provider`**, **`tier`** |
+| `pricing_list` | `tier` [null = all] |
+| `pricing_drift` | `provider` [null = all] |
+| `pricing_history` | `provider` [null], `model_id` [null], `field` [input_price_per_1m], `limit` [200], `trajectory_only` [false] |
+| `pricing_observed` | `limit` [500] |
 
 ## Routing logic
 
@@ -168,25 +199,47 @@ Priority order:
 3. **Latency** — when `latency_sensitive=True`, providers above `LATENCY_THRESHOLD_MS`
    (default 300ms) are excluded; mainly affects DeepSeek and Qwen from LATAM
 4. **Region** — optional `allowed_regions` or global `BLOCKED_REGIONS` env var
+5. **Health** — with `health_aware` (default), a provider failing in recent history
+   moves behind *all* healthy providers, whatever their price. It is never excluded.
+   Health is scored on the server's global history, shared across every user.
+6. **Failover** — on a transient error (429/5xx/timeout) the next provider in that
+   order is tried, up to `max_failover`.
+
+A tier is a price bucket of comparable models, not a guarantee they are equal.
+With every key supplied, no constraints and no cache, routing on the shipped table
+picks Groq llama-3.1-8b-instant (fast), DeepSeek deepseek-flash (balanced) and Groq
+llama-3.3-70b-versatile (powerful) at 1,000 input / 500 output tokens.
+
+Budgets (`arbitrage_set_budget`) are alerts at 80% and 100%; they never block a
+request.
 
 ## Pricing notes
 
-Token prices are hardcoded in `providers.py` and reflect approximate list prices
-as of mid-2025. Prices change frequently — verify against official pricing pages:
-- https://www.anthropic.com/pricing
-- https://openai.com/pricing
-- https://ai.google.dev/pricing
-- https://groq.com/pricing/
-- https://mistral.ai/technology/
-- https://api-docs.deepseek.com/quick_start/pricing
-- https://www.alibabacloud.com/help/en/model-studio/models
-- https://docs.x.ai/docs/models
+Prices live in `prices.json` with a `verified_at` date and a `max_age_days` limit
+(45). Once the table is older than that, `arbitrage_route_completion` and
+`arbitrage_estimate_cost` refuse with `price_table_stale` until a human re-verifies
+the prices (`ARBITRAGE_ALLOW_STALE_PRICES=1` downgrades the refusal to a warning).
+`python scripts/check_prices.py` reports the age; `arbitrage_check_price_drift`
+compares fetchable prices against the table but never edits it.
+
+Prompt caching: `prices.json` models a cache-read rate for Anthropic, Gemini,
+Mistral, DeepSeek, Grok and qwen-max. OpenAI's cache rates are not published on its
+current pricing page, so they are omitted; OpenAI, Groq, qwen-flash and qwen-plus
+bill `cached_input_tokens` at the full input rate.
+
+Groq and Qwen prices were carried from the previous sweep, not re-read on
+2026-11-01 (see `prices.json` notes). The pricing pages each provider is checked
+against are listed in `prices.json` under `pricing_urls`.
 
 ## Project structure
 
 ```
 cheaprouter/
-├── server.py        — FastMCP server, all tool definitions
+├── server.py        — FastMCP router server, its 10 tool definitions
+├── pricing_server.py — second MCP server: verified prices with provenance (5 tools)
+├── provenance.py    — trust tiers: verified / proxy / observed
+├── price_history.py — append-only price trajectory (price_history.jsonl)
+├── scripts/         — check_prices.py (staleness), refresh_prices.py, gen_listing.py
 ├── providers.py     — Provider registry (built from prices.json), regions, BYOK key resolution
 ├── pricing_table.py — Price-table loader + staleness guard
 ├── refresh.py       — Price drift check + refresh proposal (S4b)
@@ -197,8 +250,8 @@ cheaprouter/
 ├── history.py       — spend analytics: sessions, spend report, budgets
 ├── storage.py       — pluggable history backend (Upstash Redis / JSONL)
 ├── health.py        — provider health tracking, deprioritizes failing providers
-├── tokens.py        — accurate input-token counting (tiktoken) for cost routing
-├── tests/           — pytest suite (pricing, routing, providers, key-leak guard)
+├── tokens.py        — input-token counting (tiktoken o200k_base) for cost routing
+├── tests/           — pytest suite (no network; see tests/conftest.py)
 ├── Dockerfile       — container build
 ├── Makefile         — install / test / run shortcuts
 ├── pyproject.toml   — package metadata and dependencies

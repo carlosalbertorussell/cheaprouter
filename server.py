@@ -5,15 +5,23 @@ BYOK (Bring Your Own Keys): callers supply their provider API keys per request.
 The server holds no credentials — routing intelligence is the value, not API access.
 
 Tools:
-  arbitrage_get_pricing       — Full price comparison table for a tier + volume
-  arbitrage_estimate_cost     — Pre-flight cost estimate before committing a request
-  arbitrage_route_completion  — Route and execute a completion on the cheapest provider
-  arbitrage_provider_status   — Availability and config status per provider
-  arbitrage_get_history       — Past routing decisions with spend and savings summary
+  arbitrage_get_pricing        — Full price comparison table for a tier + volume
+  arbitrage_estimate_cost      — Pre-flight cost estimate before committing a request
+  arbitrage_route_completion   — Route and execute a completion on the cheapest provider
+  arbitrage_provider_status    — Availability and config status per provider
+  arbitrage_get_history        — Past routing decisions with spend and savings summary
+  arbitrage_spend_report       — Spend by provider / tier / day
+  arbitrage_set_budget         — Monthly budget alert for a session token
+  arbitrage_provider_health    — Recent success rate per provider
+  arbitrage_count_tokens       — Count input tokens (o200k_base)
+  arbitrage_check_price_drift  — Compare fetchable prices against prices.json
 
 Run (local):
-  python server.py --stdio     (stdio — for Claude Desktop / local MCP clients)
-  python server.py             (streamable HTTP on port 8000 — default, matches MCPize cloud)
+  python server.py --stdio     (stdio — for Claude Desktop / local MCP clients;
+                                provider env keys may fill in for missing api_keys)
+  python server.py             (streamable HTTP on $PORT, default 8081 — matches MCPize
+                                cloud; only per-request api_keys count unless
+                                ARBITRAGE_ALLOW_ENV_KEYS=1)
 
 Deploy (MCPize):
   mcpize deploy                (no secrets needed — users supply keys per request)
@@ -38,7 +46,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 from providers import PROVIDERS, VALID_TIERS, resolve_api_key
-from pricing import estimate_all_providers, format_pricing_table
+from pricing import CostEstimate, compute_savings, estimate_all_providers, format_pricing_table
 from pricing_table import price_table_status, is_stale, age_days, _allow_stale, VERIFIED_AT, MAX_AGE_DAYS
 from router import route
 from health import provider_health
@@ -59,13 +67,14 @@ mcp = FastMCP(
 
 TIER_DESC = "Capability tier: 'tier_fast' (cheap/fast), 'tier_balanced' (mid-range), 'tier_powerful' (flagship)"
 
-CACHE_DESC = "Of input_tokens, how many are expected to be cache hits. Providers with cache pricing (Anthropic, OpenAI, DeepSeek) bill these far cheaper, which can change which provider is cheapest. Providers without cache pricing bill them at the full input rate. Default 0."
+CACHE_DESC = "Of input_tokens, how many are expected to be cache hits. Models with a cache-read price in prices.json (Anthropic, Gemini, Mistral, DeepSeek, Grok, and qwen-max) bill these far cheaper, which can change which provider is cheapest. Models without one (currently OpenAI, Groq, qwen-flash, qwen-plus) bill them at the full input rate. Default 0."
 
 API_KEYS_DESC = (
     "Your provider API keys as a dict. Supply only the providers you want eligible. "
     'Example: {"anthropic": "sk-ant-...", "openai": "sk-...", "groq": "gsk_...", '
-    '"deepseek": "sk-...", "gemini": "AIza...", "mistral": "...", "qwen": "sk-..."}. '
-    "Keys are used only for this request and never stored or logged."
+    '"deepseek": "sk-...", "gemini": "AIza...", "mistral": "...", "qwen": "sk-...", "grok": "xai-..."}. '
+    "Keys are used only for this request and never stored or logged. A hosted (HTTP) "
+    "server never falls back to the operator's environment keys."
 )
 
 PROVIDER_IDS = ["anthropic", "openai", "gemini", "groq", "mistral", "deepseek", "qwen", "grok"]
@@ -125,7 +134,7 @@ class RouteCompletionInput(BaseModel):
     cached_input_tokens: int = Field(0, description=CACHE_DESC, ge=0, le=2_000_000)
     stream: bool = Field(False, description="Consume the provider's streaming endpoint (S5). Lowers time-to-first-token and reports it; the full text is still returned as one result at the end. Failover applies only before the first streamed token — a mid-stream error is terminal. Only Anthropic and OpenAI-compatible providers can stream; others fall back to a normal call.")
     session: Optional[str] = Field(None, description="Opaque session token to attribute spend to you. Reused across requests to track your own cumulative spend; never mapped to your identity.")
-    health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind healthy providers of similar price, but never excluded. Set False for pure cheapest-first routing.")
+    health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind all healthy providers whatever their price, but never excluded. Health is scored on the server's global history, shared across users. Set False for pure cheapest-first routing.")
     max_failover: int = Field(2, description="On a transient error (429/5xx/timeout), how many additional providers to try, in ranked order, before giving up. 0 disables failover. Non-transient errors (bad key, bad request) never fail over.", ge=0, le=7)
 
     @field_validator("tier")
@@ -146,12 +155,12 @@ class GetHistoryInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     limit: int = Field(20, description="Number of recent records to return", ge=1, le=100)
     summary_only: bool = Field(False, description="If True, return aggregated stats only")
-    session: Optional[str] = Field(None, description="Scope history to your session token. Omit to see the global (unscoped) history.")
+    session: Optional[str] = Field(None, description="Scope history to your session token. Omit to see every session's records (sessions appear only as hashes).")
 
 
 class SpendReportInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    session: Optional[str] = Field(None, description="Scope the report to your session token. Omit for global spend.")
+    session: Optional[str] = Field(None, description="Scope the report to your session token. Omit for every session's spend combined.")
     limit: int = Field(500, description="Max records to aggregate", ge=1, le=2000)
     since: Optional[str] = Field(None, description="ISO date/datetime (e.g. '2026-09-01'); exclude older records.")
 
@@ -224,6 +233,39 @@ async def _run_streaming(provider, model, api_key, messages, system_prompt, max_
         raw_response={},
     )
     return result, (ttft_ms if ttft_ms is not None else latency_ms), started
+
+
+def _price_at(pid: str, tier: str, input_tokens: int, output_tokens: int,
+              cached_input_tokens: int) -> CostEstimate:
+    """Price one provider at the given token counts with the same cache-aware
+    formula routing uses (pricing.CostEstimate.compute)."""
+    provider = PROVIDERS[pid]
+    return CostEstimate.compute(
+        provider_id=pid, provider=provider, model=provider.models[tier], tier=tier,
+        input_tokens=input_tokens, output_tokens=output_tokens, user_keys={},
+        cached_input_tokens=cached_input_tokens,
+    )
+
+
+def _actual_savings(pool: list[str], used: CostEstimate, tier: str, input_tokens: int,
+                    output_tokens: int, cached_input_tokens: int) -> Optional[dict]:
+    """
+    Savings of the provider that actually answered, at the actual token counts.
+
+    Baseline: the most expensive provider in the eligible (keyed, not excluded)
+    pool, every member priced at the same actual token counts and cache split.
+    None when the pool has a single provider (nothing to compare against).
+    Never negative: the used provider is itself in the pool.
+    """
+    if len(pool) < 2:
+        return None
+    priced = [used if pid == used.provider_id else
+              _price_at(pid, tier, input_tokens, output_tokens, cached_input_tokens)
+              for pid in pool]
+    baseline = max(priced, key=lambda e: e.total_cost_usd)
+    savings = compute_savings(used, baseline)
+    savings["vs_provider_id"] = baseline.provider_id
+    return savings
 
 
 # ─── Tools ────────────────────────────────────────────────────────────────────
@@ -362,7 +404,7 @@ async def arbitrage_estimate_cost(params: EstimateCostInput) -> str:
 
     if not decision.winner:
         return json.dumps({
-            "error": "No eligible providers found. Check that you supplied api_keys for at least one provider.",
+            "error": "No eligible providers found. Check that you supplied api_keys for at least one provider. A hosted (HTTP) server never uses the operator's environment keys.",
             "excluded": decision.excluded,
             "known_providers": PROVIDER_IDS,
         }, indent=2)
@@ -403,7 +445,10 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
 
     Returns:
         str: JSON with completion text, routing metadata, actual token usage,
-             actual cost, and savings vs. most expensive alternative.
+             actual cost (cache-aware), and savings of the provider that answered
+             vs. the most expensive eligible provider, priced at the actual token
+             counts (`savings.vs_provider_id` names it). `estimated_savings` is the
+             pre-flight figure for the routed winner.
     """
     refusal = _stale_price_refusal()
     if refusal:
@@ -427,7 +472,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
 
     if not decision.winner:
         return json.dumps({
-            "error": "No eligible providers found. Check that api_keys includes at least one valid provider key.",
+            "error": "No eligible providers found. Check that api_keys includes at least one valid provider key. A hosted (HTTP) server never uses the operator's environment keys.",
             "excluded": decision.excluded,
             "known_providers": PROVIDER_IDS,
         }, indent=2)
@@ -472,22 +517,26 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
             used = est
             attempts.append({"provider_id": pid, "outcome": "success",
                              "streamed": bool(use_stream)})
+            # Actual cost and savings for the provider that answered, at the
+            # actual token counts, with the same cache-aware pricing as routing.
+            actual = _price_at(pid, params.tier, completion.input_tokens_used,
+                               completion.output_tokens_used, params.cached_input_tokens)
+            actual_savings = _actual_savings(
+                ranked, actual, params.tier, completion.input_tokens_used,
+                completion.output_tokens_used, params.cached_input_tokens)
             # Log the successful decision, attributed to the provider that worked.
-            success_cost = (
-                (completion.input_tokens_used / 1_000_000) * model.input_price_per_1m
-                + (completion.output_tokens_used / 1_000_000) * model.output_price_per_1m
-            )
             log_decision(
                 decision_dict={**decision.to_dict(),
                                "winner": {**decision.to_dict()["winner"],
                                           "provider_id": pid,
                                           "provider_name": provider.name,
-                                          "region": provider.region}},
+                                          "region": provider.region},
+                               "savings": actual_savings},
                 session=params.session,
                 actual_input_tokens=completion.input_tokens_used,
                 actual_output_tokens=completion.output_tokens_used,
                 actual_latency_ms=completion.latency_ms,
-                actual_cost_usd=success_cost,
+                actual_cost_usd=actual.total_cost_usd,
             )
             break
         except Exception as exc:
@@ -499,13 +548,17 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
                 "error_class": str(exc).split(":")[0][:60],
             })
             # Log this provider's failure (feeds S8 health), attributed to it.
+            # A failed attempt bills nothing and saves nothing: cost 0, saved 0,
+            # so spend and savings totals are not inflated by failover.
             log_decision(
                 decision_dict={**decision.to_dict(),
                                "winner": {"provider_id": pid,
                                           "provider_name": provider.name,
                                           "region": provider.region,
-                                          "total_cost_usd": est.total_cost_usd}},
+                                          "total_cost_usd": 0.0},
+                               "savings": {"saved_usd": 0.0}},
                 session=params.session,
+                actual_cost_usd=0.0,
                 error=str(exc),
             )
             if mid_stream:
@@ -522,14 +575,12 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         }, indent=2)
 
     model = PROVIDERS[used.provider_id].models[params.tier]
-    actual_input_cost = (completion.input_tokens_used / 1_000_000) * model.input_price_per_1m
-    actual_output_cost = (completion.output_tokens_used / 1_000_000) * model.output_price_per_1m
-    actual_total_cost = actual_input_cost + actual_output_cost
 
     # SP1d — waist interaction: publish the OBSERVED signal (metadata-only) to the
-    # shared price-history spine. This is the effective per-1M unit rate the real
-    # call was billed at — a validation/drift signal for the pricing side, NEVER a
-    # published price. Opt-in via ARBITRAGE_EMIT_OBSERVED to avoid overhead by
+    # shared price-history spine. The unit rates are the TABLE prices for the model
+    # that answered (prices.json), not a rate read from the provider's bill — so it
+    # records which model real traffic used at what listed price, NEVER a published
+    # price and not an independent measurement. Opt-in via ARBITRAGE_EMIT_OBSERVED to avoid overhead by
     # default. Carries only provider/model/tier/unit-price — no content, no keys.
     if os.getenv("ARBITRAGE_EMIT_OBSERVED", "").strip() in ("1", "true", "TRUE", "yes"):
         try:
@@ -559,8 +610,12 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         "cost": {
             "actual_input_tokens": completion.input_tokens_used,
             "actual_output_tokens": completion.output_tokens_used,
-            "actual_cost_usd": round(actual_total_cost, 8),
-            "savings": decision.savings,
+            "actual_cost_usd": actual.total_cost_usd,
+            "actual_cached_input_tokens": actual.cached_input_tokens,
+            # Savings of the provider that answered vs. the most expensive
+            # eligible provider, all priced at the actual token counts.
+            "savings": actual_savings,
+            "estimated_savings": decision.savings,
         },
         "latency_ms": completion.latency_ms,
         "excluded_providers": decision.excluded,
@@ -673,7 +728,8 @@ async def arbitrage_get_history(params: GetHistoryInput) -> str:
 
     Records carry routing metadata only — provider, tier, region, token counts,
     cost, latency, savings — never API keys and never message content. Pass a
-    `session` token to see only your own records; omit it for the global history.
+    `session` token to see only your own records; omit it to see every session's
+    records (sessions appear only as hashes).
 
     Args:
         params (GetHistoryInput):
@@ -745,7 +801,8 @@ async def arbitrage_set_budget(params: SetBudgetInput) -> str:
     """
     Set a monthly USD spend budget for your session. Once set, every
     arbitrage_route_completion call made with the same session token returns a
-    budget status, with an alert when you cross 80% or go over.
+    budget status, with an alert when you cross 80% or go over. The budget is an
+    alert only: requests over budget still run.
 
     Args:
         params (SetBudgetInput):
@@ -884,8 +941,17 @@ async def arbitrage_check_price_drift(params: CheckPriceDriftInput) -> str:
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    if "--stdio" in sys.argv:
+def main(argv: Optional[list[str]] = None) -> None:
+    argv = sys.argv if argv is None else argv
+    if "--stdio" in argv:
+        # Local single-user transport: provider env keys may fill in for
+        # missing api_keys. Never enabled for HTTP unless ARBITRAGE_ALLOW_ENV_KEYS=1.
+        import providers as _providers
+        _providers.allow_env_keys_for_local_transport()
         mcp.run(transport="stdio")
     else:
         mcp.run(transport="streamable-http")
+
+
+if __name__ == "__main__":
+    main()
