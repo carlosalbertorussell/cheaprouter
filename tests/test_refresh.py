@@ -269,3 +269,37 @@ def test_index_openrouter():
     idx = _refresh_mod._index_openrouter(_or_feed())
     assert "openai/gpt-4o-mini" in idx
     assert idx["openai/gpt-4o-mini"]["prompt"] == "0.00000015"
+
+
+# ─── _fetch_json over a mocked transport (the real HTTP helper) ───────────────
+
+def test_fetch_json_success_and_headers(mock_http):
+    import httpx
+    http = mock_http(lambda req: httpx.Response(200, json={"data": [1]}))
+    assert refresh._fetch_json("https://feed.example/models") == {"data": [1]}
+    assert http.requests[0].headers["accept"] == "application/json"
+    assert http.requests[0].method == "GET"
+    assert http.timeouts == [refresh.FETCH_TIMEOUT]
+
+
+def test_fetch_json_follows_redirects(mock_http):
+    import httpx
+    def handler(req):
+        if req.url.path == "/old":
+            return httpx.Response(301, headers={"Location": "https://feed.example/new"})
+        return httpx.Response(200, json={"ok": True})
+    mock_http(handler)
+    assert refresh._fetch_json("https://feed.example/old") == {"ok": True}
+
+
+@pytest.mark.parametrize("kind", ["500", "not-json", "connect"])
+def test_fetch_json_failures_return_none(mock_http, kind):
+    import httpx
+    def handler(req):
+        if kind == "500":
+            return httpx.Response(500)
+        if kind == "not-json":
+            return httpx.Response(200, content=b"<html>")
+        raise httpx.ConnectError("down", request=req)
+    mock_http(handler)
+    assert refresh._fetch_json("https://feed.example/x") is None

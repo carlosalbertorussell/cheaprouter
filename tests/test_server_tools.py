@@ -35,9 +35,20 @@ def test_get_pricing_with_keys(route_env):
     # one table row per provider, ranked 1..8
     rows = [l for l in out.splitlines() if l.startswith("| ") and l[2].isdigit()]
     assert [r.split("|")[1].strip() for r in rows] == [str(i) for i in range(1, 9)]
-    assert "**No api_keys supplied**" in out       # GetPricingInput takes no keys
+    assert "**No api_keys supplied**" in out       # no keys passed
     assert "**Overall cheapest:**" in out and "**Price spread:**" in out
     assert "Stale prices" not in out
+
+
+def test_get_pricing_cheapest_among_callers_keys(route_env):
+    s = route_env.server
+    out = _run(s.arbitrage_get_pricing(s.GetPricingInput(
+        tier="tier_fast", api_keys={"anthropic": FAKE})))
+    import providers
+    m = providers.PROVIDERS["anthropic"].models["tier_fast"]
+    assert f"**Cheapest (your keys):** Anthropic (`{m.model_id}`)" in out
+    assert "No api_keys supplied" not in out
+    assert out.count("✅") == 1                    # only the keyed provider is configured
 
 
 def test_get_pricing_stale_banner_but_not_refused(route_env):
