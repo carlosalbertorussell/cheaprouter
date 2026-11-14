@@ -11,3 +11,9 @@ venv/
 dist/
 *.egg-info/
 .DS_Store
+
+# Coverage outputs
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
