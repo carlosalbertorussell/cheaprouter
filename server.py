@@ -895,8 +895,10 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
     Caller errors such as a bad key (401/403) or a bad request (400/404) are
     ignored, each session contributes at most `max_per_session` records per
     provider, and a provider is marked unhealthy only when failures come from at
-    least `min_failing_sessions` distinct sessions, so no single caller can make
-    a provider look unhealthy for others.
+    least `min_failing_sessions` distinct sessions (2 over HTTP; 1 on a local
+    stdio server, which has one user; HEALTH_MIN_SESSIONS overrides both), so no
+    single caller of a hosted server can make a provider look unhealthy for
+    others. A provider reporting its model retired is not counted either.
 
     Providers absent from the report have no recent history and are treated as
     healthy by the router.
@@ -909,8 +911,8 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
         str: JSON mapping provider_id -> {score, samples, healthy, sessions,
              failing_sessions}, plus the thresholds in effect.
     """
-    from health import (HEALTH_MAX_PER_SESSION, HEALTH_MIN_SAMPLES, HEALTH_MIN_SESSIONS,
-                        HEALTH_SCAN_FACTOR, HEALTH_THRESHOLD, HEALTH_WINDOW)
+    from health import (HEALTH_MAX_PER_SESSION, HEALTH_MIN_SAMPLES, HEALTH_SCAN_FACTOR,
+                        HEALTH_THRESHOLD, HEALTH_WINDOW, min_sessions)
     snap = await asyncio.to_thread(provider_health, limit=params.window)
     unhealthy = [pid for pid, h in snap.items() if not h["healthy"]]
     return json.dumps({
@@ -921,12 +923,15 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
             "min_samples": HEALTH_MIN_SAMPLES,
             "unhealthy_at_success_rate_below_or_equal": HEALTH_THRESHOLD,
             "max_per_session": HEALTH_MAX_PER_SESSION,
-            "min_failing_sessions": HEALTH_MIN_SESSIONS,
+            # Effective value: HEALTH_MIN_SESSIONS if set, else 1 over local
+            # stdio, else 2 (ST6).
+            "min_failing_sessions": min_sessions(),
             "scan_factor": HEALTH_SCAN_FACTOR,
         },
         "counts": "Successes and provider-side transient failures (429, 5xx, timeouts, "
-                  "connection errors). Caller errors (bad key, bad request) and "
-                  "unclassified pre-ST5 failures are ignored.",
+                  "connection errors). Caller errors (bad key, bad request), "
+                  "model-unavailable errors and unclassified pre-ST5 failures are "
+                  "ignored.",
         "note": "Unhealthy providers are deprioritized in routing, never excluded.",
     }, indent=2)
 
