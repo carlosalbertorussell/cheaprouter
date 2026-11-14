@@ -7,6 +7,84 @@ One task per unit, PARTIAL-honest over DONE-false, closures noted inline.
 
 ## Active
 
+### ST1 — Regression test coverage
+
+**Goal:** make the test suite catch regressions in the paths users actually depend
+on — real provider adapters, streaming, money maths, key-leak guards, every MCP
+tool, the Upstash layer — before refactoring the history/storage layer. Tests and
+CI only; no product-code change, no test seams added.
+
+**Why now:** an audit (2026-11-14) found 184 passing tests, but only 29% coverage of
+`client.py`, six of nine `server.py` tools never called, the streaming tests mocking
+the very code they claimed to test, one test that would turn CI red on 2026-12-16
+with no code change (`test_shipped_prices_json_is_fresh`), one test calling the live
+OpenRouter feed, and no coverage enforcement in CI.
+
+**Delivered on this branch:**
+- **P0 — determinism.** The date-dependent shipped-table test is replaced by
+  deterministic ones (the shipped table loads and validates; staleness at fixed
+  dates and against a monkeypatched UTC clock). The drift-report test is stubbed
+  and asserts real content. New autouse network guard in `tests/conftest.py` fails
+  any test that opens a real httpx connection.
+- **P1 — adapters, streaming, key leaks.** `tests/test_client.py`: Anthropic,
+  OpenAI-compatible (all six) and Gemini over `httpx.MockTransport` — URL, auth
+  headers, body (system prompt placement, max_tokens, role mapping), text/token
+  parsing, HTTP and transport errors propagating with the right transient class.
+  `tests/test_streaming.py`: the real Anthropic/OpenAI SSE parsers and the real
+  `server._run_streaming` (text, usage, TTFT, started flag on a mid-body disconnect),
+  plus `route_completion` end to end with only HTTP mocked. `tests/test_key_leak.py`:
+  Gemini 429 and ConnectError/failover via `route_completion` — the key is in
+  neither the response nor the history store.
+- **P2 — money, history, budgets, tools.** `tests/test_route_completion.py`:
+  hand-computed costs and savings incl. the cached-input split, actual cost billed
+  at the succeeding provider's rates, per-attempt history attribution during
+  failover, budget alerts at 80% / over budget, previous-month exclusion, latest
+  budget wins. `tests/test_server_tools.py`: every tool (incl. `get_pricing` stale
+  banner, `check_price_drift` with a proposal), `estimate_cost` with no winner,
+  `provider_status` by id / unknown id, input-model validation (bad tier, bounds,
+  required fields, extra fields), and the registered tool set.
+- **P3 — Upstash and fallbacks.** The real `UpstashBackend._cmd` over a mock
+  transport: the exact LPUSH / LTRIM 0 4999 / SADD sequence with the Bearer header,
+  list cap, scoped/unscoped reads (newest-first merge, limit, bad JSON skipped),
+  500 / timeout / ConnectError swallowed, routing still answering during an Upstash
+  outage; `get_backend` with one env var; JSONL ordering/corruption; token-counting
+  fallbacks. Weak tests tightened (savings `>= 0`, the tautological observed-emit
+  test, the loose stale-override assertion, error-key-only asserts).
+- **P4 — CI.** `py_compile` covers every module and script; pytest runs with
+  pytest-cov over all product modules and `--cov-fail-under=92`.
+
+**Result:** 184 → 329 tests, all passing (repeated runs, random order). Source
+coverage 79% → 96.6% (`client.py` 29% → 98%, `server.py` 66% → 98%, `storage.py`
+86% → 100%, `tokens.py` 89% → 100%).
+
+**Bug found — NOT fixed (product change, out of scope):** budgets silently vanish.
+`get_budget`/`budget_status` only scan the newest 500 history records, so once a
+session routes ~500 calls after `set_budget`, the budget marker falls out of the
+window: `get_budget` returns None and `route_completion` stops sending
+over-budget alerts. On Upstash the 5000-record list cap (LTRIM) eventually deletes
+the marker outright. Repro: `set_budget('u', 1.0)`, then 500 ×
+`log_decision(..., session='u', actual_cost_usd=0.01)` → `budget_status('u')` is
+`None` although $5 was spent against a $1 budget. No test committed for it (it
+would fail); fix with the budget-storage change below.
+
+**PARTIAL / deferred:**
+- **Upstash non-blocking refactor (follow-up, not started):** non-blocking history
+  writes, a 1-2s Upstash timeout, one `/pipeline` request per write, a cached
+  health snapshot, single-read `budget_status`. The new tests pin *current*
+  behaviour; the read-after-write tests (`test_health`, `test_analytics`,
+  `test_route_completion`, `test_failover::test_deprioritized_provider_last_in_pool`)
+  will need a flush/drain hook once writes go async, and the
+  LPUSH/LTRIM/SADD sequence test will need updating for the pipeline.
+- Budget storage should move out of the capped spend list (fixes the bug above).
+- The key-leak guard holds because `build_record` and the attempt log keep only
+  the text before the first `:` of an error, and httpx messages put `https:`
+  before the key. It works, but by accident; a dedicated redaction step would be
+  sturdier.
+- Not covered: `pricing_server`/`server` `__main__` entrypoints, a few
+  `price_history` backend branches, the `GLOBALLY_BLOCKED_REGIONS` env path.
+- CI still installs tiktoken, which may download its encoding on first use; tests
+  pass with either the encoder or the heuristic.
+
 ### SD1 — Skill packaging + MCP-registry distribution (free discovery)
 
 **Goal:** make the server *discoverable*, not just hosted. MCPize hosts the server;

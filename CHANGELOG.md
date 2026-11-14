@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **ST1 — regression test coverage.** 184 → 329 tests; source coverage 79% → 96.6% (`client.py` 29% → 98%, `server.py` 66% → 98%). New tests for the provider adapters (request shape, parsing, errors) and the real streaming parsers / `_run_streaming` over `httpx.MockTransport`; end-to-end key-leak checks (Gemini 429, ConnectError failover); hand-computed costs, savings and the cached-input split; failover history attribution; budget alerts; every MCP tool plus input validation; the Upstash REST layer and outage handling; token-counting fallbacks. An autouse guard fails any test that opens a real network connection. CI now compiles every module and enforces `--cov-fail-under=92`. Tests and CI only — no product-code change.
+
+### Fixed
+- **Date-dependent test removed.** `test_shipped_prices_json_is_fresh` would have failed CI on 2026-12-16 with no code change; replaced by deterministic shipped-table and fixed-clock staleness tests. `test_format_report_runs` no longer calls the live OpenRouter feed.
+
 ### Changed
 - **Docs accuracy pass (pre-discovery).** Brought MCPize-facing docs in line with shipped reality before pursuing registry/discovery: `mcpize.yaml` refreshed (7→8 providers incl. Grok, description now reflects health/failover/caching/streaming/analytics, current env vars, v1.1.0); `MCPIZE_DOCS.md` gained a **CheapRouter Pricing** section documenting the 5 `pricing_*` tools of the second server, fixed 'seven'→'eight', and replaced retired model names (Gemini 1.5/2.5, DeepSeek R1, Qwen Turbo) in the tier table + FAQ with the current SC1 lineup; `README.md` provider table corrected to the actual current model IDs (it had listed retired gemini-2.0-flash / deepseek-chat / etc.). No code change.
 
