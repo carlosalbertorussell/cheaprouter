@@ -117,3 +117,16 @@ def route_env(tmp_path, monkeypatch):
     importlib.reload(pricing_table)
     importlib.reload(providers)
     importlib.reload(server)
+
+
+@pytest.fixture(autouse=True)
+def _drain_background_history_writes(_no_network):
+    """
+    Upstash history writes run on a background thread (storage._BackgroundWriter).
+    Drain them after every test so a write queued in one test can never land
+    during another. Depends on _no_network so the drain happens while the
+    network guard is still installed.
+    """
+    yield
+    import storage
+    assert storage.flush_writes(timeout=5.0), "background history writes did not drain"

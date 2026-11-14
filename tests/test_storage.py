@@ -119,6 +119,7 @@ def upstash(monkeypatch):
     be = UpstashBackend("https://fake.upstash.io", "tok")
     fake = _FakeRedis()
     monkeypatch.setattr(be, "_cmd", lambda *args: fake.run(args))
+    monkeypatch.setattr(be, "_pipeline", lambda *cmds: [fake.run(c) for c in cmds])
     return be
 
 
@@ -157,6 +158,7 @@ def test_upstash_cmd_failure_is_silent(monkeypatch):
     from storage import UpstashBackend
     be = UpstashBackend("https://fake.upstash.io", "tok")
     monkeypatch.setattr(be, "_cmd", lambda *args: None)  # simulate outage
+    monkeypatch.setattr(be, "_pipeline", lambda *cmds: [None] * len(cmds))
     be.write(_rec("s_1"))                # must not raise
     assert be.read(session="s_1", limit=10) == []
 
@@ -170,26 +172,53 @@ UPSTASH_TOKEN = "upstash-test-FAKE-token"
 
 
 class _RestRedis:
-    """Upstash REST semantics over _FakeRedis: POST a JSON command array, get
-    {"result": ...} back. Optionally fails specific commands."""
+    """Upstash REST semantics over _FakeRedis.
+
+    - POST /          a JSON command array → {"result": ...}
+    - POST /pipeline  a JSON array of command arrays → [{"result"|"error"}, ...]
+
+    `fail` maps a command name to a failure mode. "500" fails that command (an
+    HTTP 500 for a single command, a per-item error inside a pipeline, which is
+    how Upstash reports it). "timeout"/"connect" fail the whole request.
+    """
     def __init__(self, fail=None):
         self.redis = _FakeRedis()
         self.fail = fail or {}
 
     def __call__(self, request):
-        cmd = json.loads(request.content)
-        mode = self.fail.get(cmd[0])
-        if mode == "500":
-            return httpx.Response(500, json={"error": "ERR internal"})
-        if mode == "timeout":
-            raise httpx.ReadTimeout("timed out", request=request)
-        if mode == "connect":
-            raise httpx.ConnectError("unreachable", request=request)
-        return httpx.Response(200, json={"result": self.redis.run(cmd)})
+        body = json.loads(request.content)
+        pipeline = request.url.path.endswith("/pipeline")
+        cmds = body if pipeline else [body]
+        for cmd in cmds:
+            mode = self.fail.get(cmd[0])
+            if mode == "timeout":
+                raise httpx.ReadTimeout("timed out", request=request)
+            if mode == "connect":
+                raise httpx.ConnectError("unreachable", request=request)
+        if not pipeline:
+            if self.fail.get(body[0]) == "500":
+                return httpx.Response(500, json={"error": "ERR internal"})
+            return httpx.Response(200, json={"result": self.redis.run(body)})
+        out = []
+        for cmd in cmds:
+            if self.fail.get(cmd[0]) == "500":
+                out.append({"error": "ERR internal"})
+            else:
+                out.append({"result": self.redis.run(cmd)})
+        return httpx.Response(200, json=out)
 
 
 def _bodies(http):
     return [json.loads(r.content) for r in http.requests]
+
+
+def _commands(http):
+    """Every Redis command sent, flattening pipelined requests."""
+    out = []
+    for r in http.requests:
+        body = json.loads(r.content)
+        out.extend(body if r.url.path.endswith("/pipeline") else [body])
+    return out
 
 
 def test_upstash_write_issues_lpush_ltrim_sadd(mock_http):
@@ -199,21 +228,25 @@ def test_upstash_write_issues_lpush_ltrim_sadd(mock_http):
     rec = _rec("s_abc")
     rec["api_key"] = "sk-test-FAKE-LEAK"                          # must be sanitized away
     be.write(rec)
-    bodies = _bodies(http)
+    # one write == one pipelined request
+    assert len(http.requests) == 1
+    req = http.requests[0]
+    assert req.method == "POST"
+    assert str(req.url) == UPSTASH_URL + "/pipeline"
+    assert req.headers["authorization"] == f"Bearer {UPSTASH_TOKEN}"
+    cmds = _commands(http)
     key = "history:s_abc"
-    assert [b[0] for b in bodies] == ["LPUSH", "LTRIM", "SADD"]
-    assert bodies[0][1] == key
-    stored = json.loads(bodies[0][2])
+    assert [c[0] for c in cmds] == ["LPUSH", "LTRIM", "LPUSH", "LTRIM", "SADD"]
+    assert cmds[0][1] == key
+    stored = json.loads(cmds[0][2])
     assert "api_key" not in stored and set(stored) <= ALLOWED_FIELDS
-    assert bodies[1] == ["LTRIM", key, 0, UpstashBackend.MAX_PER_SESSION - 1]
+    assert cmds[1] == ["LTRIM", key, 0, UpstashBackend.MAX_PER_SESSION - 1]
     assert UpstashBackend.MAX_PER_SESSION == 5000
-    assert bodies[2] == ["SADD", "history:sessions", key]
-    for r in http.requests:
-        assert r.method == "POST"
-        assert str(r.url) == UPSTASH_URL
-        assert r.headers["authorization"] == f"Bearer {UPSTASH_TOKEN}"
-    # every command uses a bounded timeout (current value pinned only as an upper bound)
-    assert all(t is not None and 0 < t <= 10.0 for t in http.timeouts)
+    assert cmds[2] == ["LPUSH", "history:recent", cmds[0][2]]
+    assert cmds[3] == ["LTRIM", "history:recent", 0, UpstashBackend.MAX_RECENT - 1]
+    assert cmds[4] == ["SADD", "history:sessions", key]
+    # short default timeout (UPSTASH_TIMEOUT_S, 2s)
+    assert http.timeouts == [2.0]
 
 
 def test_upstash_ltrim_caps_list(mock_http, monkeypatch):
@@ -256,10 +289,24 @@ def test_upstash_unscoped_read_merges_newest_first_with_limit(mock_http):
     http.requests.clear()
     got = be.read(None, 3)
     assert [r["cost_usd"] for r in got] == [4, 3, 2]
-    cmds = _bodies(http)
-    assert cmds[0] == ["SMEMBERS", "history:sessions"]
-    assert sorted(c[1] for c in cmds[1:]) == ["history:s_a", "history:s_b", "history:s_c"]
-    assert all(c[0] == "LRANGE" and c[2:] == [0, 2] for c in cmds[1:])
+    # one request on the global recent list, however many sessions exist
+    assert _bodies(http) == [["LRANGE", "history:recent", 0, 2]]
+
+
+def test_upstash_unscoped_read_fallback_is_pipelined(mock_http):
+    # Data written before history:recent existed: per-session lists + index only.
+    rest = _RestRedis()
+    http = mock_http(rest)
+    for s_, ts, cost in [("s_a", "2026-01-01", 1), ("s_b", "2026-01-03", 3), ("s_c", "2026-01-02", 2)]:
+        key = f"history:{s_}"
+        rest.redis.lists[key] = [json.dumps(_rec_at(s_, ts + "T00:00:00+00:00", cost))]
+        rest.redis.sets.setdefault("history:sessions", set()).add(key)
+    be = UpstashBackend(UPSTASH_URL, UPSTASH_TOKEN)
+    got = be.read(None, 2)
+    assert [r["cost_usd"] for r in got] == [3, 2]
+    # LRANGE recent (empty), SMEMBERS, then ONE pipeline for all sessions
+    assert [r.url.path for r in http.requests] == ["/", "/", "/pipeline"]
+    assert sorted(c[1] for c in _commands(http)[2:]) == ["history:s_a", "history:s_b", "history:s_c"]
 
 
 def test_upstash_read_skips_bad_json(mock_http):
@@ -277,7 +324,7 @@ def test_upstash_failures_swallowed(mock_http, mode):
     http = mock_http(rest)
     be = UpstashBackend(UPSTASH_URL, UPSTASH_TOKEN)
     be.write(_rec("s_1"))                                   # must not raise
-    assert len(http.requests) == 3                          # each command still attempted
+    assert len(http.requests) == 1                          # one pipelined request
     assert be.read("s_1", 10) == []
     assert be.read(None, 10) == []
     assert be._cmd("PING") is None
@@ -289,7 +336,7 @@ def test_upstash_partial_failure_keeps_other_commands(mock_http):
     be = UpstashBackend(UPSTASH_URL, UPSTASH_TOKEN)
     be.write(_rec("s_1"))
     assert len(be.read("s_1", 10)) == 1                     # LPUSH landed
-    assert be.read(None, 10) == []                          # not indexed → unscoped misses it
+    assert len(be.read(None, 10)) == 1                      # unscoped reads use history:recent, not the index
 
 
 def test_upstash_cmd_missing_result_is_none(mock_http):
@@ -347,7 +394,9 @@ def test_session_key_hashed_in_upstash_key(mock_http, monkeypatch):
     http = mock_http(rest)
     monkeypatch.setenv("UPSTASH_REDIS_REST_URL", UPSTASH_URL)
     monkeypatch.setenv("UPSTASH_REDIS_REST_TOKEN", UPSTASH_TOKEN)
+    import storage
     history.log_decision({"winner": {"provider_id": "groq"}}, session="alice@example.com")
+    assert storage.flush_writes(timeout=5.0)                # Upstash writes are backgrounded
     blob = json.dumps(_bodies(http))
     assert "alice" not in blob
     assert f"history:{history.normalize_session('alice@example.com')}" in blob
@@ -375,7 +424,11 @@ def test_route_completion_survives_upstash_outage(route_env, mock_http, monkeypa
         session="outage", health_aware=True))))
     assert out["response"] == "still routed"
     assert out["routing"]["provider_id"] == "groq"
-    cmds = [b[0] for b in _bodies(http)]
-    # health read (SMEMBERS), the success write, and the budget read all hit Upstash
-    assert "SMEMBERS" in cmds and "LPUSH" in cmds and "LRANGE" in cmds
+    import storage
+    assert storage.flush_writes(timeout=5.0)                # the success write is backgrounded
+    cmds = _commands(http)
+    # health read (global recent list), the success write, and the budget read all hit Upstash
+    assert ["LRANGE", "history:recent", 0, 49] in cmds
+    assert any(c[0] == "LPUSH" for c in cmds)
+    assert any(c[0] == "LRANGE" and c[1].startswith("history:s_") for c in cmds)
     assert "budget" not in out

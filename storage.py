@@ -20,8 +20,12 @@ schema is enforced by build_record(); callers cannot inject arbitrary fields.
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import queue
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Protocol
@@ -142,22 +146,41 @@ class JSONLBackend:
 
 # ─── Upstash Redis backend (durable serverless store) ─────────────────────────
 
+def _upstash_timeout() -> float:
+    """Per-request timeout for Upstash calls. Short: history is best-effort."""
+    try:
+        return max(0.1, float(os.getenv("UPSTASH_TIMEOUT_S", "2.0")))
+    except ValueError:
+        return 2.0
+
+
 class UpstashBackend:
     """
     Upstash Redis over its HTTP REST API — no SDK, no connection pooling, which
     suits MCPize's serverless container model.
 
-    Data model (per-session lists):
-      history:{session}   → Redis list; each element is one JSON record.
-                            LPUSH on write (newest first), LRANGE on read.
-      history:sessions    → Redis set of every session key seen, so an unscoped
-                            read (session=None) can fan out across sessions.
+    Data model:
+      history:{session}   → Redis list per session; each element is one JSON
+                            record. LPUSH on write (newest first), LRANGE on read.
+      history:recent      → Redis list of the most recent records across ALL
+                            sessions (capped). Unscoped reads (health scoring,
+                            global history) use it: one request, however many
+                            sessions exist.
+      history:sessions    → Redis set of every session key seen. Only used as a
+                            fallback for unscoped reads when history:recent is
+                            empty (data written before it existed).
 
     Session isolation is physical: each session's records live under a separate
     key, so a scoped read can only ever touch one session's list.
+
+    Every write is a single /pipeline request (LPUSH + LTRIM per list + SADD),
+    with a short timeout (UPSTASH_TIMEOUT_S, default 2s).
     """
 
     MAX_PER_SESSION = 5000   # cap list length so a session can't grow unbounded
+    MAX_RECENT = 5000        # cap on the global recent-records list
+    RECENT_KEY = "history:recent"
+    SESSIONS_KEY = "history:sessions"
 
     def __init__(self, url: str, token: str):
         self.base = url.rstrip("/")
@@ -178,44 +201,176 @@ class UpstashBackend:
         history is best-effort and must never break routing.
         """
         try:
-            with httpx.Client(timeout=10.0) as c:
+            with httpx.Client(timeout=_upstash_timeout()) as c:
                 r = c.post(self.base, headers=self._headers, json=list(args))
                 r.raise_for_status()
                 return r.json().get("result")
         except Exception:
             return None
 
+    def _pipeline(self, *commands: list) -> list:
+        """
+        Run several Redis commands in ONE HTTP request via Upstash's /pipeline
+        endpoint. Returns one result per command (None for a command that
+        errored). On any transport failure, returns all-None — best-effort.
+        """
+        if not commands:
+            return []
+        try:
+            with httpx.Client(timeout=_upstash_timeout()) as c:
+                r = c.post(f"{self.base}/pipeline", headers=self._headers,
+                           json=[list(cmd) for cmd in commands])
+                r.raise_for_status()
+                body = r.json()
+            if not isinstance(body, list) or len(body) != len(commands):
+                return [None] * len(commands)
+            return [item.get("result") if isinstance(item, dict) and "error" not in item else None
+                    for item in body]
+        except Exception:
+            return [None] * len(commands)
+
     def write(self, record: dict) -> None:
         rec = sanitize(record)
         session = rec.get("session", "anon")
         key = f"history:{session}"
         payload = json.dumps(rec)
-        # newest-first list, trim to cap, register the session key in the index
-        self._cmd("LPUSH", key, payload)
-        self._cmd("LTRIM", key, 0, self.MAX_PER_SESSION - 1)
-        self._cmd("SADD", "history:sessions", key)
+        # newest-first per-session list + global recent list, both capped, and
+        # the session registered in the index — all in a single request.
+        self._pipeline(
+            ["LPUSH", key, payload],
+            ["LTRIM", key, 0, self.MAX_PER_SESSION - 1],
+            ["LPUSH", self.RECENT_KEY, payload],
+            ["LTRIM", self.RECENT_KEY, 0, self.MAX_RECENT - 1],
+            ["SADD", self.SESSIONS_KEY, key],
+        )
 
     def read(self, session: Optional[str], limit: int) -> list[dict]:
         if session is not None:
             return self._read_key(f"history:{session}", limit)
 
-        # Unscoped: fan out across all known session lists, then merge newest-first.
-        keys = self._cmd("SMEMBERS", "history:sessions") or []
+        # Unscoped: one LRANGE on the global recent list.
+        recent = self._decode(self._cmd("LRANGE", self.RECENT_KEY, 0, limit - 1))
+        if recent:
+            return recent[:limit]
+
+        # Fallback for data written before history:recent existed: fan out across
+        # the session lists, but in one pipelined request rather than one per key.
+        keys = self._cmd("SMEMBERS", self.SESSIONS_KEY) or []
+        if not keys:
+            return []
+        results = self._pipeline(*[["LRANGE", k, 0, limit - 1] for k in keys])
         merged: list[dict] = []
-        for key in keys:
-            merged.extend(self._read_key(key, limit))
+        for raw in results:
+            merged.extend(self._decode(raw))
         merged.sort(key=lambda r: r.get("timestamp") or "", reverse=True)
         return merged[:limit]
 
     def _read_key(self, key: str, limit: int) -> list[dict]:
-        raw = self._cmd("LRANGE", key, 0, limit - 1) or []
+        return self._decode(self._cmd("LRANGE", key, 0, limit - 1))
+
+    @staticmethod
+    def _decode(raw) -> list[dict]:
         out = []
-        for item in raw:
+        for item in raw or []:
             try:
                 out.append(json.loads(item))
             except (json.JSONDecodeError, TypeError):
                 continue
         return out
+
+
+# ─── Background writer (keeps remote writes off the routing path) ─────────────
+
+class _BackgroundWriter:
+    """
+    A single daemon thread that drains a bounded queue of (backend, record)
+    writes. One thread keeps writes in order. If the queue is full (the remote
+    store is down and writes are backing up) new writes are dropped — history
+    is best-effort and must never slow routing down.
+    """
+
+    def __init__(self, maxsize: int = 1000):
+        self._q: "queue.Queue[tuple]" = queue.Queue(maxsize=maxsize)
+        self._thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+        self.dropped = 0
+
+    def _ensure_thread(self) -> None:
+        with self._lock:
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(
+                    target=self._run, name="cheaprouter-history-writer", daemon=True)
+                self._thread.start()
+
+    def _run(self) -> None:
+        while True:
+            backend, record = self._q.get()
+            try:
+                backend.write(record)
+            except Exception:
+                pass   # best-effort
+            finally:
+                self._q.task_done()
+
+    def submit(self, backend, record: dict) -> None:
+        self._ensure_thread()
+        try:
+            self._q.put_nowait((backend, record))
+        except queue.Full:
+            self.dropped += 1
+
+    def pending(self) -> int:
+        return self._q.unfinished_tasks
+
+    def flush(self, timeout: Optional[float] = None) -> bool:
+        """Wait until queued writes have finished. True if drained in time."""
+        q = self._q
+        deadline = None if timeout is None else time.monotonic() + timeout
+        with q.all_tasks_done:
+            while q.unfinished_tasks:
+                if deadline is None:
+                    q.all_tasks_done.wait()
+                    continue
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                q.all_tasks_done.wait(remaining)
+        return True
+
+
+_writer = _BackgroundWriter()
+atexit.register(lambda: _writer.flush(timeout=_upstash_timeout()))
+
+
+def write_record(record: dict) -> None:
+    """
+    Persist one record via the active backend.
+
+    The backend is resolved NOW (on the caller's thread), so the write goes to
+    the backend configured at call time. Remote backends (Upstash) are written
+    in the background so a slow or unreachable store never delays routing; the
+    local JSONL backend is written inline (it is a fast local append).
+    """
+    backend = get_backend()
+    if backend.name == "upstash":
+        _writer.submit(backend, record)
+    else:
+        backend.write(record)
+
+
+def read_records(session: Optional[str], limit: int) -> list[dict]:
+    """
+    Read recent records via the active backend. Waits briefly for this process's
+    pending background writes first, so a read sees writes made just before it.
+    """
+    if _writer.pending():
+        _writer.flush(timeout=_upstash_timeout() + 0.5)
+    return get_backend().read(session, limit)
+
+
+def flush_writes(timeout: Optional[float] = None) -> bool:
+    """Wait for pending background writes (for tests and shutdown)."""
+    return _writer.flush(timeout)
 
 
 # ─── Backend selection ────────────────────────────────────────────────────────
