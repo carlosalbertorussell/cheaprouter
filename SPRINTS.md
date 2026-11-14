@@ -643,11 +643,9 @@ the two forces that fight each other; this sequence resolves them.
 - ~~**SC1c — Catalog-wide "cheapest current" pass (deferred from SC1b, 2026-10-12).**~~
   **Done 2026-11-01** — see "SC1c — Catalog-wide sweep + OpenAI migration" under
   Closed (Anthropic 5.5, OpenAI GPT-6, Mistral Large 4, grok-4.7 adopted).
-- **OpenAI migration (urgent-ish, deferred from SC1b).** gpt-4o-mini, gpt-4o and o3
-  were kept and priced from their model pages, but OpenAI dropped them from its
-  pricing table, marks o3 Deprecated (succeeded by GPT-5), and shuts down snapshots
-  gpt-4o-2024-05-13 on 2026-10-23 and o3-2025-04-16 on 2026-12-11. Candidates:
-  GPT-5.6 Sol / Terra / Luna (prices not yet read). Decide before December.
+- ~~**OpenAI migration (urgent-ish, deferred from SC1b).**~~ **Done 2026-11-01 in
+  SC1c:** migrated to gpt-6-luna / gpt-6.1-terra / gpt-6.1-sol (see its Closed entry);
+  cache-read rates modelled in SC1e.
 - **Catalog hygiene found in SC1b (small, no decision of substance):** pin Mistral
   to dated ids (`mistral-small-2603`, `mistral-large-2512`) — no Mistral page says
   what the `-latest` aliases resolve to; model cache pricing for Mistral (Small 4
