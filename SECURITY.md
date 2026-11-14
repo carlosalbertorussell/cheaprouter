@@ -23,9 +23,23 @@ cheaprouter is a BYOK (Bring Your Own Keys) routing server. A few design decisio
 
 **API keys are never stored.** Keys passed in `api_keys` are used for the duration of the request only. They are not logged, persisted, or retained in any form.
 
-**Request content is never stored.** The `messages` payload sent to `arbitrage_route_completion` is forwarded to the chosen provider and immediately discarded. The routing history log records only metadata: timestamp, provider selected, token counts, cost, and latency.
+**Request content is never stored.** The `messages` payload sent to `arbitrage_route_completion` is forwarded to the chosen provider and immediately discarded. The routing history log records only metadata: timestamp, hashed session token, provider, tier, token counts, cost, savings, latency, and success/error class.
 
-**The server holds no credentials.** The MCPize deployment has no server-side API keys. There is nothing to exfiltrate from the server itself.
+**Session tokens group records; they are not access control.** A read scoped to a `session` returns only that session's records. `arbitrage_get_history` and `arbitrage_spend_report` called without `session` return every session's records, with sessions shown only as hashes. Anyone who knows a token string can read its records. Scoping unscoped reads by default is a planned change.
+
+**Provider health is shared.** Health scoring reads the server's global history, so failures on any caller's requests (including ones made with an invalid key) can deprioritize a provider for everyone.
+
+**A hosted server never spends the operator's keys.** Over HTTP (the transport `python server.py` uses, and the one MCPize runs) only keys the caller passes in `api_keys` count. Provider key environment variables (`ANTHROPIC_API_KEY`, ...) are ignored, so an anonymous caller cannot route completions billed to whoever runs the server. The env-var fallback exists only for local use:
+
+| How the server runs | Env-var keys used for providers missing from `api_keys`? |
+|---|---|
+| `python server.py --stdio` (Claude Desktop, local clients) | Yes — the process belongs to one local user |
+| `python server.py` (streamable HTTP, MCPize) | **No** |
+| HTTP with `ARBITRAGE_ALLOW_ENV_KEYS=1` | Yes — explicit opt-in for a private deployment you protect yourself. Never set it on a public endpoint. |
+
+A key the caller passes always wins over an env var. Do not store provider keys as MCPize secrets (`.env.example` explains this).
+
+**The server holds no provider credentials.** The MCPize deployment needs no provider API keys. The only server-side secret is the optional Upstash token for durable routing history.
 
 ## Reporting a Vulnerability
 
@@ -62,6 +76,7 @@ This project follows coordinated disclosure. Please give reasonable time for a f
 
 The following are by design and not considered vulnerabilities:
 
-- **Routing history is shared across users** — history records contain no content, no keys, and no PII; only aggregate routing metadata
-- **History resets on redeploy** — ephemeral by design on MCPize; use `ARBITRAGE_HISTORY_FILE` override for persistence
+- **Unscoped routing history is visible across users** — records contain no content, no keys, and no raw session tokens; only routing metadata (see above)
+- **History resets on redeploy without Upstash** — the JSONL fallback is ephemeral on MCPize; set `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` for durable history
+- **Budgets do not block requests** — `arbitrage_set_budget` sets alerts only
 - **No authentication on the MCP endpoint** — access control is delegated to the MCP client and MCPize platform layer

@@ -38,16 +38,20 @@ Clone the repo and run locally:
 }
 ```
 
-In local stdio mode, keys can come from the environment as a convenience. In the
-hosted deployment, always pass keys per request in the `api_keys` parameter.
+In local stdio mode, keys can come from the environment as a convenience. The
+hosted (HTTP) deployment ignores environment keys: always pass keys per request in
+the `api_keys` parameter.
 
 ## Claude.ai
 
-Settings → Connectors → Add custom connector → paste the MCPize endpoint URL.
+Settings → Connectors → Add custom connector → paste the endpoint URL
+`https://cheaprouter.mcpize.run/mcp`.
 
 ## Supplying your keys
 
-Every tool accepts an `api_keys` object. Supply only the providers you want eligible:
+`arbitrage_route_completion` requires an `api_keys` object; `arbitrage_estimate_cost`,
+`arbitrage_get_pricing` and `arbitrage_provider_status` accept one (default `{}`).
+Supply only the providers you want eligible:
 
 ```json
 {

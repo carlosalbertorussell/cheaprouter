@@ -22,6 +22,9 @@ def _set_prices(t):
     g.pop("cached_input_price_per_1m", None)
     o = t["providers"]["openai"]["models"]["tier_fast"]
     o.update(input_price_per_1m=3.0, output_price_per_1m=4.0, cached_input_price_per_1m=0.5)
+    m = t["providers"]["mistral"]["models"]["tier_fast"]
+    m.update(input_price_per_1m=2.0, output_price_per_1m=3.0)
+    m.pop("cached_input_price_per_1m", None)
 
 
 @pytest.fixture
@@ -126,6 +129,94 @@ def test_route_actual_cost_uses_provider_that_succeeded(env, monkeypatch):
     # 1000 * $3/1M + 500 * $4/1M = 0.003 + 0.002
     assert out["cost"]["actual_cost_usd"] == 0.005
     assert out["routing"]["provider_id"] == "openai"
+
+
+# ─── actual savings (ST4) ─────────────────────────────────────────────────────
+# Prices: groq 1/2 (no cache), mistral 2/3 (no cache), openai 3/4 (cache 0.5).
+# The request is "hi" (pre-flight estimate: 5 input, 500 output tokens); every
+# provider answers with 1000 input / 500 output, so the actual figures differ
+# from the pre-flight ones.
+
+def test_route_savings_at_actual_tokens(env, monkeypatch):
+    monkeypatch.setattr(env.server, "call_provider", _fake_call([_ok(1000, 500)]))
+    out = _route(env.server, api_keys={"groq": FAKE, "openai": FAKE})
+    # groq 0.001 + 0.001 = 0.002; openai 0.003 + 0.002 = 0.005 → saved 0.003 (60%)
+    assert out["cost"]["actual_cost_usd"] == 0.002
+    assert out["cost"]["savings"] == {"saved_usd": 0.003, "saved_pct": 60.0,
+                                      "vs_provider": "OpenAI", "vs_cost_usd": 0.005,
+                                      "vs_provider_id": "openai"}
+    # pre-flight: groq 5*1e-6 + 500*2e-6 = 0.001005; openai 0.000015 + 0.002 = 0.002015
+    assert out["cost"]["estimated_savings"]["saved_usd"] == 0.00101
+    rec = history.read_history(limit=1)[0]
+    assert rec["saved_usd"] == pytest.approx(0.003)
+
+
+def test_route_savings_after_failover_to_baseline_is_zero(env, monkeypatch):
+    # groq fails, openai (the most expensive eligible provider) answers: nothing saved.
+    monkeypatch.setattr(env.server, "call_provider", _fake_call([_http_429(), _ok(1000, 500)]))
+    out = _route(env.server, api_keys={"groq": FAKE, "openai": FAKE}, max_failover=1)
+    assert out["routing"]["provider_id"] == "openai"
+    assert out["cost"]["savings"] == {"saved_usd": 0.0, "saved_pct": 0.0,
+                                      "vs_provider": "OpenAI", "vs_cost_usd": 0.005,
+                                      "vs_provider_id": "openai"}
+
+
+def test_route_savings_after_failover_to_middle_provider(env, monkeypatch):
+    monkeypatch.setattr(env.server, "call_provider", _fake_call([_http_429(), _ok(1000, 500)]))
+    out = _route(env.server, api_keys={"groq": FAKE, "openai": FAKE, "mistral": FAKE},
+                 max_failover=1)
+    assert out["routing"]["provider_id"] == "mistral"
+    # mistral 1000*2e-6 + 500*3e-6 = 0.0035 vs openai 0.005 → 0.0015 (30%)
+    assert out["cost"]["actual_cost_usd"] == 0.0035
+    s = out["cost"]["savings"]
+    assert (s["saved_usd"], s["saved_pct"], s["vs_provider_id"]) == (0.0015, 30.0, "openai")
+
+
+def test_route_actual_cost_applies_cache_discount(env, monkeypatch):
+    monkeypatch.setattr(env.server, "call_provider", _fake_call([_ok(1000, 500)]))
+    out = _route(env.server, api_keys={"openai": FAKE}, cached_input_tokens=400)
+    # openai: fresh 600*3e-6 = 0.0018 + cached 400*0.5e-6 = 0.0002 + out 0.002 = 0.004
+    assert out["cost"]["actual_cost_usd"] == 0.004
+    assert out["cost"]["actual_cached_input_tokens"] == 400
+    assert out["cost"]["savings"] is None          # single provider: nothing to compare
+    assert history.read_history(limit=1)[0]["cost_usd"] == pytest.approx(0.004)
+
+
+def test_route_cache_aware_savings_baseline(env, monkeypatch):
+    monkeypatch.setattr(env.server, "call_provider", _fake_call([_ok(1000, 500)]))
+    out = _route(env.server, api_keys={"groq": FAKE, "openai": FAKE}, cached_input_tokens=400)
+    # groq has no cache price → 0.002; openai cache-aware 0.004 → saved 0.002 (50%)
+    assert out["cost"]["actual_cost_usd"] == 0.002
+    s = out["cost"]["savings"]
+    assert (s["saved_usd"], s["saved_pct"], s["vs_cost_usd"]) == (0.002, 50.0, 0.004)
+
+
+def test_cached_tokens_clamped_to_actual_input(env, monkeypatch):
+    monkeypatch.setattr(env.server, "call_provider", _fake_call([_ok(100, 0)]))
+    out = _route(env.server, api_keys={"openai": FAKE}, cached_input_tokens=400)
+    # only 100 input tokens came back, all of them cached: 100 * 0.5e-6
+    assert out["cost"]["actual_cached_input_tokens"] == 100
+    assert out["cost"]["actual_cost_usd"] == 0.00005
+
+
+def test_failed_attempts_log_zero_cost_and_savings(env, monkeypatch):
+    monkeypatch.setattr(env.server, "call_provider", _fake_call([_http_429(), _ok(1000, 500)]))
+    _route(env.server, api_keys={"groq": FAKE, "openai": FAKE}, max_failover=1, session="zed")
+    ok, fail = history.read_history(limit=10, session="zed")
+    assert (fail["provider_id"], fail["cost_usd"], fail["saved_usd"]) == ("groq", 0.0, 0.0)
+    assert (ok["provider_id"], ok["cost_usd"], ok["saved_usd"]) == ("openai", 0.005, 0.0)
+    summ = history.history_summary(limit=10, session="zed")
+    assert summ["total_cost_usd"] == 0.005 and summ["total_saved_usd"] == 0.0
+    rep = history.spend_report(session="zed")
+    assert rep["total_cost_usd"] == 0.005
+
+
+def test_all_failed_attempts_add_no_spend(env, monkeypatch):
+    monkeypatch.setattr(env.server, "call_provider", _fake_call([_http_429(), _http_429()]))
+    _route(env.server, api_keys={"groq": FAKE, "openai": FAKE}, max_failover=1, session="yan")
+    summ = history.history_summary(limit=10, session="yan")
+    assert summ["failed"] == 2
+    assert summ["total_cost_usd"] == 0.0 and summ["total_saved_usd"] == 0.0
 
 
 # ─── history attribution during failover ──────────────────────────────────────

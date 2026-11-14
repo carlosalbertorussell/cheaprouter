@@ -1,6 +1,6 @@
 name: cheaprouter
 version: 1.1.0
-description: "BYOK MCP router that sends each LLM completion to the cheapest capable provider across 8 providers (Anthropic, OpenAI, Google Gemini, Groq, Mistral, DeepSeek, Alibaba Qwen, xAI Grok). Cheapest-per-tier routing with prompt-caching-aware costing, accurate token counting, provider health tracking, automatic failover, optional streaming, and per-session spend analytics + budgets. Users supply their own provider keys per request; the server stores no keys and no content. Prices are versioned and staleness-guarded — routing refuses on stale prices rather than misprice."
+description: "BYOK MCP router that sends each LLM completion to the cheapest provider in the capability tier you pick, across 8 providers (Anthropic, OpenAI, Google Gemini, Groq, Mistral, DeepSeek, Alibaba Qwen, xAI Grok). Cheapest-per-tier routing with prompt-caching-aware costing, tiktoken token counting, provider health tracking, automatic failover, optional streaming, and per-session spend analytics with budget alerts. Users supply their own provider keys per request; the server stores no keys and no content, and never uses provider keys of its own. Prices are versioned and staleness-guarded — routing refuses on stale prices rather than misprice."
 runtime: python
 entrypoint: server.py
 
@@ -12,6 +12,10 @@ env:
   LATENCY_THRESHOLD_MS: "300"       # exclude providers slower than this when latency_sensitive
   BLOCKED_REGIONS: ""               # comma-sep regions to hard-block, e.g. "cn"
   PORT: "8081"
+
+  # Provider API keys: do NOT set them here or as MCPize secrets. Over HTTP the
+  # server uses only keys callers pass in api_keys and ignores provider key env
+  # vars. ARBITRAGE_ALLOW_ENV_KEYS=1 would let any caller spend them — leave unset.
 
   # Provider health (S8) — tuning; sane defaults, override only if needed
   HEALTH_WINDOW: "50"
