@@ -40,9 +40,9 @@ def test_cache_provider_splits_fresh_and_cached():
 
 
 def test_non_cache_provider_bills_cached_at_full_rate():
-    # Groq has no cache price → cached tokens cost the same as fresh.
-    plain = _est("groq", "tier_fast", 10000, 100, 0)
-    cached = _est("groq", "tier_fast", 10000, 100, 9000)
+    # OpenAI has no cache price modelled (SC1c) → cached tokens cost the same as fresh.
+    plain = _est("openai", "tier_fast", 10000, 100, 0)
+    cached = _est("openai", "tier_fast", 10000, 100, 9000)
     assert cached.input_cost_usd == plain.input_cost_usd
     assert cached.cache_supported is False
 
@@ -58,8 +58,10 @@ def test_cache_supported_flag_reported():
     assert _est("anthropic", "tier_fast", 100, 10, 0).cache_supported is True
     assert _est("deepseek", "tier_fast", 100, 10, 0).cache_supported is True
     assert _est("gemini", "tier_fast", 100, 10, 0).cache_supported is True   # Gemini cache = 10% input
+    # Groq gpt-oss cache from console.groq.com model pages (SC1d, 2026-11-14):
+    assert _est("groq", "tier_fast", 100, 10, 0).cache_supported is True
     # Providers with no cache offering as modelled — cached tokens bill at full input rate:
-    assert _est("groq", "tier_fast", 100, 10, 0).cache_supported is False
+    assert _est("qwen", "tier_fast", 100, 10, 0).cache_supported is False
     # OpenAI cache not re-read in the SC1c GPT-6 migration (2026-11-01), so omitted here:
     assert _est("openai", "tier_fast", 100, 10, 0).cache_supported is False
 
@@ -67,13 +69,13 @@ def test_cache_supported_flag_reported():
 # ─── routing impact ───────────────────────────────────────────────────────────
 
 def test_heavy_caching_can_flip_winner():
-    # tier_fast: Groq wins with no cache; DeepSeek's cache read flips it under
-    # heavy caching. This is the whole point of S3.
+    # tier_fast at 200K input: Qwen (no cache modelled) wins with no cache;
+    # DeepSeek's cache read flips it under heavy caching. This is the whole point of S3.
     no_cache = route(PROVIDERS, "tier_fast", 200000, 500, user_keys=ALL_KEYS,
                      health_aware=False, cached_input_tokens=0)
     heavy = route(PROVIDERS, "tier_fast", 200000, 500, user_keys=ALL_KEYS,
                   health_aware=False, cached_input_tokens=190000)
-    assert no_cache.winner.provider_id == "groq"
+    assert no_cache.winner.provider_id == "qwen"
     assert heavy.winner.provider_id == "deepseek"
 
 
