@@ -25,7 +25,17 @@ cheaprouter is a BYOK (Bring Your Own Keys) routing server. A few design decisio
 
 **Request content is never stored.** The `messages` payload sent to `arbitrage_route_completion` is forwarded to the chosen provider and immediately discarded. The routing history log records only metadata: timestamp, provider selected, token counts, cost, and latency.
 
-**The server holds no credentials.** The MCPize deployment has no server-side API keys. There is nothing to exfiltrate from the server itself.
+**A hosted server never spends the operator's keys.** Over HTTP (the transport `python server.py` uses, and the one MCPize runs) only keys the caller passes in `api_keys` count. Provider key environment variables (`ANTHROPIC_API_KEY`, ...) are ignored, so an anonymous caller cannot route completions billed to whoever runs the server. The env-var fallback exists only for local use:
+
+| How the server runs | Env-var keys used for providers missing from `api_keys`? |
+|---|---|
+| `python server.py --stdio` (Claude Desktop, local clients) | Yes — the process belongs to one local user |
+| `python server.py` (streamable HTTP, MCPize) | **No** |
+| HTTP with `ARBITRAGE_ALLOW_ENV_KEYS=1` | Yes — explicit opt-in for a private deployment you protect yourself. Never set it on a public endpoint. |
+
+A key the caller passes always wins over an env var. Do not store provider keys as MCPize secrets (`.env.example` explains this).
+
+**The server holds no provider credentials.** The MCPize deployment needs no provider API keys. The only server-side secret is the optional Upstash token for durable routing history.
 
 ## Reporting a Vulnerability
 

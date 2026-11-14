@@ -5,15 +5,23 @@ BYOK (Bring Your Own Keys): callers supply their provider API keys per request.
 The server holds no credentials — routing intelligence is the value, not API access.
 
 Tools:
-  arbitrage_get_pricing       — Full price comparison table for a tier + volume
-  arbitrage_estimate_cost     — Pre-flight cost estimate before committing a request
-  arbitrage_route_completion  — Route and execute a completion on the cheapest provider
-  arbitrage_provider_status   — Availability and config status per provider
-  arbitrage_get_history       — Past routing decisions with spend and savings summary
+  arbitrage_get_pricing        — Full price comparison table for a tier + volume
+  arbitrage_estimate_cost      — Pre-flight cost estimate before committing a request
+  arbitrage_route_completion   — Route and execute a completion on the cheapest provider
+  arbitrage_provider_status    — Availability and config status per provider
+  arbitrage_get_history        — Past routing decisions with spend and savings summary
+  arbitrage_spend_report       — Spend by provider / tier / day
+  arbitrage_set_budget         — Monthly budget alert for a session token
+  arbitrage_provider_health    — Recent success rate per provider
+  arbitrage_count_tokens       — Count input tokens (o200k_base)
+  arbitrage_check_price_drift  — Compare fetchable prices against prices.json
 
 Run (local):
-  python server.py --stdio     (stdio — for Claude Desktop / local MCP clients)
-  python server.py             (streamable HTTP on port 8000 — default, matches MCPize cloud)
+  python server.py --stdio     (stdio — for Claude Desktop / local MCP clients;
+                                provider env keys may fill in for missing api_keys)
+  python server.py             (streamable HTTP on $PORT, default 8081 — matches MCPize
+                                cloud; only per-request api_keys count unless
+                                ARBITRAGE_ALLOW_ENV_KEYS=1)
 
 Deploy (MCPize):
   mcpize deploy                (no secrets needed — users supply keys per request)
@@ -59,13 +67,14 @@ mcp = FastMCP(
 
 TIER_DESC = "Capability tier: 'tier_fast' (cheap/fast), 'tier_balanced' (mid-range), 'tier_powerful' (flagship)"
 
-CACHE_DESC = "Of input_tokens, how many are expected to be cache hits. Providers with cache pricing (Anthropic, OpenAI, DeepSeek) bill these far cheaper, which can change which provider is cheapest. Providers without cache pricing bill them at the full input rate. Default 0."
+CACHE_DESC = "Of input_tokens, how many are expected to be cache hits. Models with a cache-read price in prices.json (Anthropic, Gemini, Mistral, DeepSeek, Grok, and qwen-max) bill these far cheaper, which can change which provider is cheapest. Models without one (currently OpenAI, Groq, qwen-flash, qwen-plus) bill them at the full input rate. Default 0."
 
 API_KEYS_DESC = (
     "Your provider API keys as a dict. Supply only the providers you want eligible. "
     'Example: {"anthropic": "sk-ant-...", "openai": "sk-...", "groq": "gsk_...", '
-    '"deepseek": "sk-...", "gemini": "AIza...", "mistral": "...", "qwen": "sk-..."}. '
-    "Keys are used only for this request and never stored or logged."
+    '"deepseek": "sk-...", "gemini": "AIza...", "mistral": "...", "qwen": "sk-...", "grok": "xai-..."}. '
+    "Keys are used only for this request and never stored or logged. A hosted (HTTP) "
+    "server never falls back to the operator's environment keys."
 )
 
 PROVIDER_IDS = ["anthropic", "openai", "gemini", "groq", "mistral", "deepseek", "qwen", "grok"]
@@ -362,7 +371,7 @@ async def arbitrage_estimate_cost(params: EstimateCostInput) -> str:
 
     if not decision.winner:
         return json.dumps({
-            "error": "No eligible providers found. Check that you supplied api_keys for at least one provider.",
+            "error": "No eligible providers found. Check that you supplied api_keys for at least one provider. A hosted (HTTP) server never uses the operator's environment keys.",
             "excluded": decision.excluded,
             "known_providers": PROVIDER_IDS,
         }, indent=2)
@@ -427,7 +436,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
 
     if not decision.winner:
         return json.dumps({
-            "error": "No eligible providers found. Check that api_keys includes at least one valid provider key.",
+            "error": "No eligible providers found. Check that api_keys includes at least one valid provider key. A hosted (HTTP) server never uses the operator's environment keys.",
             "excluded": decision.excluded,
             "known_providers": PROVIDER_IDS,
         }, indent=2)
@@ -884,8 +893,17 @@ async def arbitrage_check_price_drift(params: CheckPriceDriftInput) -> str:
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    if "--stdio" in sys.argv:
+def main(argv: Optional[list[str]] = None) -> None:
+    argv = sys.argv if argv is None else argv
+    if "--stdio" in argv:
+        # Local single-user transport: provider env keys may fill in for
+        # missing api_keys. Never enabled for HTTP unless ARBITRAGE_ALLOW_ENV_KEYS=1.
+        import providers as _providers
+        _providers.allow_env_keys_for_local_transport()
         mcp.run(transport="stdio")
     else:
         mcp.run(transport="streamable-http")
+
+
+if __name__ == "__main__":
+    main()

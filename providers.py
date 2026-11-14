@@ -2,14 +2,18 @@
 Provider registry for cheaprouter.
 
 BYOK model: API keys are supplied per-request by the caller, not stored
-server-side. resolve_api_key() checks the user-supplied dict first, then
-falls back to environment variables for local development convenience.
+server-side. resolve_api_key() checks the user-supplied dict first. It falls
+back to provider environment variables (ANTHROPIC_API_KEY, ...) only when that
+is explicitly safe — see env_key_fallback_allowed(). Over HTTP (the hosted
+default) the fallback is off, so an anonymous caller can never spend the
+operator's keys.
 
 Pricing and model metadata are loaded from prices.json via pricing_table.py,
 which enforces a staleness guard (S4a). This module builds the PROVIDERS registry
 from that validated table; the public surface is unchanged.
 
-Capability tiers map semantically equivalent models across providers:
+Capability tiers group comparable models across providers (a cost bucket,
+not a claim that the models are equivalent):
   - tier_fast:     Small/fast models, cheap, good for simple tasks
   - tier_balanced: Mid-range models, best quality/cost ratio for most tasks
   - tier_powerful: Flagship models, maximum capability, highest cost
@@ -48,7 +52,7 @@ class ProviderConfig:
     name: str
     region: str
     base_url: str
-    api_key_env: str     # env var name — local dev fallback only
+    api_key_env: str     # env var name — stdio / opt-in fallback only
     protocol: str        # "anthropic" | "openai" | "gemini"
     models: dict[str, ModelConfig] = field(default_factory=dict)
     enabled: bool = True
@@ -61,22 +65,52 @@ class ProviderConfig:
 
 # ─── Key resolution (BYOK) ────────────────────────────────────────────────────
 
+# The env-var key fallback rule (ST4). Provider env keys are used only when:
+#   1. the server runs over stdio (a local, single-user client such as Claude
+#      Desktop) — server.py calls allow_env_keys_for_local_transport() before
+#      mcp.run(transport="stdio"); or
+#   2. the operator sets ARBITRAGE_ALLOW_ENV_KEYS=1 (explicit opt-in, e.g. a
+#      private HTTP deployment behind their own auth).
+# Otherwise — including the default streamable-HTTP transport used on MCPize —
+# only keys the caller passes in api_keys count.
+ENV_KEYS_OPT_IN_VAR = "ARBITRAGE_ALLOW_ENV_KEYS"
+_local_transport = False
+
+
+def allow_env_keys_for_local_transport(enabled: bool = True) -> None:
+    """Mark this process as serving a local (stdio) transport."""
+    global _local_transport
+    _local_transport = bool(enabled)
+
+
+def env_key_fallback_allowed() -> bool:
+    """True when provider env-var keys may stand in for missing caller keys."""
+    if _local_transport:
+        return True
+    return os.getenv(ENV_KEYS_OPT_IN_VAR, "").strip() in ("1", "true", "TRUE", "yes")
+
+
 def resolve_api_key(provider_id: str, user_keys: dict[str, str]) -> Optional[str]:
     """
     Resolve an API key for a provider. Priority:
-      1. user_keys dict passed per-request (BYOK — community users)
-      2. Environment variable (local dev fallback only)
+      1. user_keys dict passed per-request (BYOK) — always wins
+      2. Environment variable — only when env_key_fallback_allowed()
 
     Never stored; called fresh on every request. Keys are never logged.
     """
     provider = PROVIDERS.get(provider_id)
     if not provider:
         return None
-    return user_keys.get(provider_id) or os.getenv(provider.api_key_env) or None
+    key = (user_keys or {}).get(provider_id)
+    if key:
+        return key
+    if env_key_fallback_allowed():
+        return os.getenv(provider.api_key_env) or None
+    return None
 
 
 def configured_providers(user_keys: dict[str, str]) -> dict[str, ProviderConfig]:
-    """Return only providers that have a resolvable key (BYOK or env fallback)."""
+    """Return only providers that have a resolvable key (BYOK, or env when allowed)."""
     return {
         pid: prov
         for pid, prov in PROVIDERS.items()
