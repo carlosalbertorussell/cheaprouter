@@ -120,6 +120,16 @@ def route_env(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _http_transport_defaults(monkeypatch):
+    """Every test starts as the hosted (HTTP) server with no HEALTH_MIN_SESSIONS
+    override, whatever the developer's shell or an earlier test set (ST6)."""
+    import providers
+    monkeypatch.delenv("HEALTH_MIN_SESSIONS", raising=False)
+    monkeypatch.setattr(providers, "_local_transport", False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _drain_background_history_writes(_no_network):
     """
     Upstash history writes run on a background thread (storage._BackgroundWriter).

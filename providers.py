@@ -83,6 +83,12 @@ def allow_env_keys_for_local_transport(enabled: bool = True) -> None:
     _local_transport = bool(enabled)
 
 
+def is_local_transport() -> bool:
+    """True once server.main() has marked this process as serving local stdio.
+    Read at call time (health.min_sessions uses it too, ST6)."""
+    return _local_transport
+
+
 def env_key_fallback_allowed() -> bool:
     """True when provider env-var keys may stand in for missing caller keys."""
     if _local_transport:

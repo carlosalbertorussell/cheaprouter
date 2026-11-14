@@ -50,7 +50,8 @@ from pricing import CostEstimate, compute_savings, estimate_all_providers, forma
 from pricing_table import price_table_status, is_stale, age_days, _allow_stale, VERIFIED_AT, MAX_AGE_DAYS
 from router import route
 from health import provider_health
-from client import call_provider, is_transient_error, stream_provider, stream_supported, CompletionResult
+from client import (call_provider, is_model_unavailable_error, is_transient_error,
+                    stream_provider, stream_supported, CompletionResult)
 from tokens import count_message_tokens
 from history import (
     log_decision, read_history, history_summary,
@@ -135,7 +136,7 @@ class RouteCompletionInput(BaseModel):
     stream: bool = Field(False, description="Consume the provider's streaming endpoint (S5). Lowers time-to-first-token and reports it; the full text is still returned as one result at the end. Failover applies only before the first streamed token — a mid-stream error is terminal. Only Anthropic and OpenAI-compatible providers can stream; others fall back to a normal call.")
     session: Optional[str] = Field(None, description="Opaque session token to attribute spend to you. Reused across requests to track your own cumulative spend; never mapped to your identity.")
     health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind all healthy providers whatever their price, but never excluded. Health is scored on the server's global history, shared across users, counting only provider-side failures (429/5xx/timeouts/connection errors, never bad keys or bad requests), capping how much any one session contributes, and requiring failures from at least two sessions by default. Set False for pure cheapest-first routing.")
-    max_failover: int = Field(2, description="On a transient error (429/5xx/timeout), how many additional providers to try, in ranked order, before giving up. 0 disables failover. Non-transient errors (bad key, bad request) never fail over.", ge=0, le=7)
+    max_failover: int = Field(2, description="On a transient error (429/5xx/timeout) or when a provider reports the model retired or unavailable, how many additional providers to try, in ranked order, before giving up. 0 disables failover. Other non-transient errors (bad key, bad request) never fail over.", ge=0, le=7)
 
     @field_validator("tier")
     @classmethod
@@ -448,7 +449,11 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
              actual cost (cache-aware), and savings of the provider that answered
              vs. the most expensive eligible provider, priced at the actual token
              counts (`savings.vs_provider_id` names it). `estimated_savings` is the
-             pre-flight figure for the routed winner.
+             pre-flight figure for the routed winner. `routing.attempts` lists
+             each provider tried with its model ID and outcome (success,
+             transient_error, model_unavailable, error, mid_stream_error);
+             `routing.warnings` appears when a provider reported its prices.json
+             model retired or unavailable.
     """
     refusal = _stale_price_refusal()
     if refusal:
@@ -478,10 +483,16 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         }, indent=2)
 
     # Failover loop (S2): walk the ranked pool in order. On a transient error
-    # (429/5xx/timeout) move to the next provider; on a non-transient error (bad
-    # key/request) stop immediately since it would fail identically everywhere.
-    # Every failed attempt is logged as a failure with its transient flag; only
-    # transient (provider-side) failures count against S8 health (ST5).
+    # (429/5xx/timeout) move to the next provider. On a model-unavailable error
+    # (the provider retired or never had the prices.json model, ST6) also move on:
+    # the next provider serves a different model. On any other non-transient
+    # error (bad key/request) stop immediately since it would fail identically
+    # everywhere. Every failed attempt is logged as a failure with its transient
+    # flag; only transient (provider-side) failures count against S8 health
+    # (ST5). Model-unavailable failures are logged transient=False, so they do
+    # not count: a caller can trigger one (OpenAI-style APIs return
+    # model_not_found for a key without access), and deprioritizing would only
+    # hide the configuration problem that routing.warnings reports.
     ranked = decision.ranked_pool or [decision.winner.provider_id]
     max_attempts = 1 + max(0, params.max_failover)
     sequence = ranked[:max_attempts]
@@ -489,6 +500,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
     completion = None
     used = None                 # CostEstimate of the provider that succeeded
     attempts: list[dict] = []   # per-provider attempt log for the response
+    warnings: list[str] = []    # operator-facing notes, e.g. a retired model (ST6)
     stream_ttft_ms = None       # time-to-first-token, set on a successful stream
 
     for pid in sequence:
@@ -516,8 +528,8 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
                     max_tokens=params.max_tokens,
                 )
             used = est
-            attempts.append({"provider_id": pid, "outcome": "success",
-                             "streamed": bool(use_stream)})
+            attempts.append({"provider_id": pid, "model_id": model.model_id,
+                             "outcome": "success", "streamed": bool(use_stream)})
             # Actual cost and savings for the provider that answered, at the
             # actual token counts, with the same cache-aware pricing as routing.
             actual = _price_at(pid, params.tier, completion.input_tokens_used,
@@ -543,11 +555,27 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         except Exception as exc:
             transient = is_transient_error(exc)
             mid_stream = getattr(exc, "_cheaprouter_stream_started", False)
+            unavailable = (not transient and not mid_stream
+                           and is_model_unavailable_error(exc))
+            if mid_stream:
+                outcome = "mid_stream_error"
+            elif transient:
+                outcome = "transient_error"
+            elif unavailable:
+                outcome = "model_unavailable"
+            else:
+                outcome = "error"
             attempts.append({
                 "provider_id": pid,
-                "outcome": "mid_stream_error" if mid_stream else ("transient_error" if transient else "error"),
+                "model_id": model.model_id,
+                "outcome": outcome,
                 "error_class": str(exc).split(":")[0][:60],
             })
+            if unavailable:
+                # Provider and model IDs come from prices.json, never from the
+                # error body, so nothing the caller sent can appear here.
+                warnings.append(f"{pid} model {model.model_id} reported unavailable; "
+                                f"update prices.json")
             # Log this provider's failure (feeds S8 health), attributed to it.
             # A failed attempt bills nothing and saves nothing: cost 0, saved 0,
             # so spend and savings totals are not inflated by failover.
@@ -566,14 +594,17 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
             if mid_stream:
                 # Tokens already streamed — failover is unsafe. Terminal.
                 break
-            if not transient:
-                break   # non-transient → no point trying other providers
+            if not transient and not unavailable:
+                break   # bad key/request → no point trying other providers
 
     if completion is None:
+        routing = decision.to_dict()
+        if warnings:
+            routing["warnings"] = warnings
         return json.dumps({
             "error": "All attempted providers failed.",
             "attempts": attempts,
-            "routing": decision.to_dict(),
+            "routing": routing,
         }, indent=2)
 
     model = PROVIDERS[used.provider_id].models[params.tier]
@@ -627,6 +658,9 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
         "excluded_providers": decision.excluded,
         "deprioritized_providers": decision.deprioritized or [],
     }
+
+    if warnings:
+        result["routing"]["warnings"] = warnings
 
     if stream_ttft_ms is not None and result["routing"]["streamed"]:
         result["time_to_first_token_ms"] = stream_ttft_ms
@@ -861,8 +895,10 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
     Caller errors such as a bad key (401/403) or a bad request (400/404) are
     ignored, each session contributes at most `max_per_session` records per
     provider, and a provider is marked unhealthy only when failures come from at
-    least `min_failing_sessions` distinct sessions, so no single caller can make
-    a provider look unhealthy for others.
+    least `min_failing_sessions` distinct sessions (2 over HTTP; 1 on a local
+    stdio server, which has one user; HEALTH_MIN_SESSIONS overrides both), so no
+    single caller of a hosted server can make a provider look unhealthy for
+    others. A provider reporting its model retired is not counted either.
 
     Providers absent from the report have no recent history and are treated as
     healthy by the router.
@@ -875,8 +911,8 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
         str: JSON mapping provider_id -> {score, samples, healthy, sessions,
              failing_sessions}, plus the thresholds in effect.
     """
-    from health import (HEALTH_MAX_PER_SESSION, HEALTH_MIN_SAMPLES, HEALTH_MIN_SESSIONS,
-                        HEALTH_SCAN_FACTOR, HEALTH_THRESHOLD, HEALTH_WINDOW)
+    from health import (HEALTH_MAX_PER_SESSION, HEALTH_MIN_SAMPLES, HEALTH_SCAN_FACTOR,
+                        HEALTH_THRESHOLD, HEALTH_WINDOW, min_sessions)
     snap = await asyncio.to_thread(provider_health, limit=params.window)
     unhealthy = [pid for pid, h in snap.items() if not h["healthy"]]
     return json.dumps({
@@ -887,12 +923,15 @@ async def arbitrage_provider_health(params: ProviderHealthInput) -> str:
             "min_samples": HEALTH_MIN_SAMPLES,
             "unhealthy_at_success_rate_below_or_equal": HEALTH_THRESHOLD,
             "max_per_session": HEALTH_MAX_PER_SESSION,
-            "min_failing_sessions": HEALTH_MIN_SESSIONS,
+            # Effective value: HEALTH_MIN_SESSIONS if set, else 1 over local
+            # stdio, else 2 (ST6).
+            "min_failing_sessions": min_sessions(),
             "scan_factor": HEALTH_SCAN_FACTOR,
         },
         "counts": "Successes and provider-side transient failures (429, 5xx, timeouts, "
-                  "connection errors). Caller errors (bad key, bad request) and "
-                  "unclassified pre-ST5 failures are ignored.",
+                  "connection errors). Caller errors (bad key, bad request), "
+                  "model-unavailable errors and unclassified pre-ST5 failures are "
+                  "ignored.",
         "note": "Unhealthy providers are deprioritized in routing, never excluded.",
     }, indent=2)
 

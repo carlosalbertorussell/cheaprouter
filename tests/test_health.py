@@ -209,7 +209,7 @@ def test_one_session_flooding_the_window_cannot_condemn(local_backend):
 def test_single_user_server_can_opt_back_in(local_backend, monkeypatch):
     # HEALTH_MIN_SESSIONS=1: one session's transient failures are enough.
     import health
-    monkeypatch.setattr(health, "HEALTH_MIN_SESSIONS", 1)
+    monkeypatch.setenv("HEALTH_MIN_SESSIONS", "1")
     for _ in range(5):
         _log("groq", "Groq", False, session="only-me")
     assert health.provider_health()["groq"]["healthy"] is False
@@ -242,7 +242,7 @@ def test_cap_is_configurable(local_backend, monkeypatch):
     monkeypatch.setattr(health, "HEALTH_MAX_PER_SESSION", 2)
     for _ in range(10):
         _log("groq", "Groq", False, session="solo")
-    monkeypatch.setattr(health, "HEALTH_MIN_SESSIONS", 1)
+    monkeypatch.setenv("HEALTH_MIN_SESSIONS", "1")
     snap = health.provider_health()
     assert snap["groq"]["samples"] == 2                       # below min samples
     assert snap["groq"]["healthy"] is True
@@ -317,3 +317,46 @@ def test_records_without_a_provider_are_skipped(local_backend):
     history.log_decision({"winner": {}, "tier": "tier_fast", "savings": {}},
                          session="x", error="boom", transient=True)
     assert health.provider_health() == {}
+
+
+# ─── ST6: effective HEALTH_MIN_SESSIONS by transport ─────────────────────────
+
+def test_min_sessions_defaults_to_two_over_http():
+    import health, providers
+    assert providers.is_local_transport() is False
+    assert health.min_sessions() == 2
+
+
+def test_min_sessions_defaults_to_one_over_stdio(monkeypatch):
+    import health, providers
+    monkeypatch.setattr(providers, "_local_transport", True)
+    assert health.min_sessions() == 1
+
+
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.parametrize("value,expected", [("1", 1), ("3", 3), ("0", 1)])
+def test_min_sessions_env_overrides_both(monkeypatch, local, value, expected):
+    import health, providers
+    monkeypatch.setattr(providers, "_local_transport", local)
+    monkeypatch.setenv("HEALTH_MIN_SESSIONS", value)
+    assert health.min_sessions() == expected
+
+
+def test_min_sessions_malformed_env_falls_back_to_transport_default(monkeypatch):
+    import health, providers
+    monkeypatch.setenv("HEALTH_MIN_SESSIONS", "lots")
+    assert health.min_sessions() == 2
+    monkeypatch.setattr(providers, "_local_transport", True)
+    assert health.min_sessions() == 1
+
+
+def test_stdio_single_session_outage_deprioritizes(local_backend, monkeypatch):
+    # Local stdio: every call is `anon`; its transient failures now count.
+    import health, providers
+    for _ in range(5):
+        _log("groq", "Groq", False, session="anon")
+    assert health.provider_health()["groq"]["healthy"] is True      # HTTP: needs 2
+    monkeypatch.setattr(providers, "_local_transport", True)          # read per call
+    assert health.provider_health()["groq"]["healthy"] is False
+    d = route(PROVIDERS, "tier_fast", 1000, 500, user_keys=ALL_KEYS, health_aware=True)
+    assert "groq" in d.deprioritized

@@ -16,7 +16,7 @@ and no message content.
 ## When to reach for it
 - You want the cheapest provider in a tier, not a fixed provider.
 - You want to estimate or compare per-token cost across providers before sending.
-- You want automatic failover to the next provider on a transient error.
+- You want automatic failover to the next provider on a transient error or a retired model.
 - You care about data residency — route only within allowed regions.
 
 ## Capability tiers

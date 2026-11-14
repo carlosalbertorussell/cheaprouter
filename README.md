@@ -194,7 +194,8 @@ provenance. It does no routing and needs no keys. Its 5 tools:
 ## Routing logic
 
 Priority order:
-1. **Price** — always the primary signal; providers sorted cheapest-first
+1. **Price** — always the primary signal; providers sorted cheapest-first. Exact
+   cost ties break on latency, then `provider_id`, independent of `prices.json` order
 2. **Availability** — providers without an API key are excluded
 3. **Latency** — when `latency_sensitive=True`, providers above `LATENCY_THRESHOLD_MS`
    (default 300ms) are excluded; mainly affects DeepSeek and Qwen from LATAM
@@ -204,15 +205,22 @@ Priority order:
 Health is scored on the server's global history, shared across every user,
    but only provider-side failures count (429, 5xx, timeouts, connection errors);
    a caller's bad key or bad request never does, each session's say is capped, and
-   one session alone cannot mark a provider unhealthy.
-6. **Failover** — on a transient error (429/5xx/timeout) the next provider in that
-   order is tried, up to `max_failover`.
+   one session alone cannot mark a provider unhealthy over HTTP. A local stdio
+   server has one user, so there one session is enough (`HEALTH_MIN_SESSIONS`
+   defaults to 1 over stdio, 2 over HTTP; an explicit value wins).
+6. **Failover** — on a transient error (429/5xx/timeout), or when a provider says
+   the model is retired or unavailable (404, or a 400 such as Groq's
+   `model_decommissioned`), the next provider in that order is tried, up to
+   `max_failover`. A retired model shows as `"outcome": "model_unavailable"` in
+   `routing.attempts` with a `routing.warnings` entry asking the operator to update
+   `prices.json`; it does not count against health. Bad keys and other bad requests
+   still stop.
 
 A tier is a price bucket of comparable models, not a guarantee they are equal.
 With every key supplied, no constraints and no cache, routing on the shipped table
 picks Groq openai/gpt-oss-20b (fast), Groq openai/gpt-oss-120b (balanced) and Groq
 openai/gpt-oss-120b (powerful) at 1,000 input / 500 output tokens.
-`tier_balanced` is an exact tie with DeepSeek deepseek-flash (both 0.15/0.60); the sort is stable, so the provider listed first in `prices.json` (Groq) wins.
+`tier_balanced` is an exact cost tie with DeepSeek deepseek-flash (both 0.15/0.60). Exact cost ties break on latency (lower first), then `provider_id`, never on the order of `prices.json`, so Groq (us, ~180ms) wins over DeepSeek (cn, ~390ms).
 
 Budgets (`arbitrage_set_budget`) are alerts at 80% and 100%; they never block a
 request.

@@ -87,6 +87,12 @@ class CostEstimate:
         }
 
 
+def ranking_key(e: "CostEstimate") -> tuple:
+    """Sort key for routing: cost, then latency, then provider_id (see
+    estimate_all_providers for why)."""
+    return (e.total_cost_usd, e.latency_ms, e.provider_id)
+
+
 def estimate_all_providers(
     providers: dict,
     tier: str,
@@ -95,7 +101,23 @@ def estimate_all_providers(
     user_keys: dict[str, str] = None,
     cached_input_tokens: int = 0,
 ) -> list[CostEstimate]:
-    """Compute cost estimates for all providers at a given tier, sorted cheapest first."""
+    """
+    Compute cost estimates for all providers at a given tier, cheapest first.
+
+    The order is total, deterministic and independent of the order of providers
+    in prices.json (ST6):
+      1. total_cost_usd (cache-aware, at these token counts) — always primary;
+      2. latency_ms (the provider's region latency class), lower first — among
+         providers that cost exactly the same for this request, the one that
+         answers sooner is strictly better for the caller. The other fields were
+         considered and rejected: the cache rate is already priced into the total
+         at this request's cache split, so preferring a cheaper cache rate on a
+         cost tie would reward a discount this request does not use; a larger
+         context window or a region label says nothing about which tied provider
+         serves *this* request better;
+      3. provider_id, alphabetically — a stable final key so two providers tied
+         on cost and latency still sort the same on every load.
+    """
     if user_keys is None:
         user_keys = {}
     if tier not in VALID_TIERS:
@@ -119,7 +141,7 @@ def estimate_all_providers(
             )
         )
 
-    return sorted(estimates, key=lambda e: e.total_cost_usd)
+    return sorted(estimates, key=ranking_key)
 
 
 def compute_savings(chosen: CostEstimate, baseline: CostEstimate) -> dict:

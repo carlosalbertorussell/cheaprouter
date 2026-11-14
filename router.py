@@ -3,7 +3,9 @@ Routing decision engine for cheaprouter.
 
 Selects the cheapest available provider given a tier and constraints.
 Priority order (configurable via env):
-  1. Price (always primary)
+  1. Price (always primary). Exact cost ties break on latency, then provider_id
+     (pricing.ranking_key, ST6), so the result never depends on the order of
+     providers in prices.json.
   2. Availability (provider must have API key configured)
   3. Latency (exclude high-latency providers when latency_sensitive=True)
   4. Region preference (optional allow/block lists)

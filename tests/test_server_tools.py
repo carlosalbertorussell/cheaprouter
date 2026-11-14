@@ -166,7 +166,7 @@ def test_provider_health_tool(route_env):
                                  "min_samples": health.HEALTH_MIN_SAMPLES,
                                  "unhealthy_at_success_rate_below_or_equal": health.HEALTH_THRESHOLD,
                                  "max_per_session": health.HEALTH_MAX_PER_SESSION,
-                                 "min_failing_sessions": health.HEALTH_MIN_SESSIONS,
+                                 "min_failing_sessions": 2,   # HTTP default
                                  "scan_factor": health.HEALTH_SCAN_FACTOR}
     # a window of 1 only sees the newest record (openai)
     one = json.loads(_run(s.arbitrage_provider_health(s.ProviderHealthInput(window=1))))
@@ -316,3 +316,20 @@ def test_all_tools_registered(route_env):
         "arbitrage_provider_status", "arbitrage_get_history", "arbitrage_spend_report",
         "arbitrage_set_budget", "arbitrage_provider_health", "arbitrage_count_tokens",
         "arbitrage_check_price_drift"}
+
+
+def test_provider_health_reports_effective_min_sessions(route_env, monkeypatch):
+    s = route_env.server
+    import providers
+
+    def thresholds():
+        return json.loads(_run(s.arbitrage_provider_health(
+            s.ProviderHealthInput())))["thresholds"]["min_failing_sessions"]
+    assert thresholds() == 2                                  # HTTP
+    runs = []
+    monkeypatch.setattr(s.mcp, "run", lambda transport: runs.append(transport))
+    s.main(["server.py", "--stdio"])                          # marks local after import
+    assert runs == ["stdio"] and providers.is_local_transport() is True
+    assert thresholds() == 1
+    monkeypatch.setenv("HEALTH_MIN_SESSIONS", "4")
+    assert thresholds() == 4

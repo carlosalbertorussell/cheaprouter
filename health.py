@@ -31,11 +31,22 @@ it must not be something one caller can steer for everyone else (ST5):
      session share the "anon" key, and so share one cap.
   4. One session alone cannot condemn a provider. A provider is marked
      unhealthy only when its scored failures come from at least
-     HEALTH_MIN_SESSIONS distinct sessions (default 2). Without this, a caller
-     flooding the shared recent list with its own 429s could push everyone
-     else's records out of the window and leave only its capped failures. A
-     single-user server (every call from one session, e.g. local stdio with no
-     token) should set HEALTH_MIN_SESSIONS=1 to get deprioritization back.
+     min_sessions() distinct sessions: 2 over HTTP, where callers are many and
+     untrusted. Without this, a caller flooding the shared recent list with its
+     own 429s could push everyone else's records out of the window and leave
+     only its capped failures. Over local stdio (ST6) the default is 1: the
+     process serves one user, usually as the `anon` session, so a 2-session
+     rule would never deprioritize anything, and there is no other caller to
+     protect. An explicit HEALTH_MIN_SESSIONS env value always wins. The value
+     is resolved at call time, because server.main() marks the process local
+     only after this module is imported.
+
+Model-unavailable failures (a provider reporting its prices.json model retired,
+client.is_model_unavailable_error, ST6) are recorded `transient: false` and so
+do not count. They are a server-configuration problem, not an outage: the
+router already fails over and warns, and a caller can trigger them itself (an
+OpenAI-style API returns model_not_found for a key without model access), so
+counting them would hand one caller a lever on everyone's routing.
 
 The window is HEALTH_WINDOW *scored* records: up to HEALTH_SCAN_FACTOR times that
 many raw records are read (one request) so that ignored caller errors cannot
@@ -85,7 +96,33 @@ HEALTH_THRESHOLD = float(os.getenv("HEALTH_THRESHOLD", "0.5"))
 HEALTH_MAX_PER_SESSION = _int_env("HEALTH_MAX_PER_SESSION", 5)
 
 # Distinct sessions with a scored failure needed before a provider is unhealthy.
-HEALTH_MIN_SESSIONS = _int_env("HEALTH_MIN_SESSIONS", 2)
+# Resolved per call by min_sessions(): env value if set, else 1 over local stdio,
+# else 2 (ST6).
+HEALTH_MIN_SESSIONS_ENV = "HEALTH_MIN_SESSIONS"
+HEALTH_MIN_SESSIONS_HTTP = 2
+HEALTH_MIN_SESSIONS_LOCAL = 1
+
+
+def min_sessions() -> int:
+    """
+    Effective HEALTH_MIN_SESSIONS, read at call time.
+
+    An explicit HEALTH_MIN_SESSIONS (an integer >= 1) always wins. Otherwise 1
+    when the process serves local stdio (providers.is_local_transport(), the
+    marker server.main() sets before mcp.run), else 2.
+    """
+    raw = os.getenv(HEALTH_MIN_SESSIONS_ENV, "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass               # malformed → fall through to the transport default
+    try:
+        import providers
+        local = providers.is_local_transport()
+    except Exception:
+        local = False
+    return HEALTH_MIN_SESSIONS_LOCAL if local else HEALTH_MIN_SESSIONS_HTTP
 
 # Raw records read per scored record, so ignored records can't crowd out real ones.
 HEALTH_SCAN_FACTOR = _int_env("HEALTH_SCAN_FACTOR", 4)
@@ -113,12 +150,13 @@ def provider_health(limit: int = None) -> dict[str, dict]:
       - samples:  number of records the score is based on
       - healthy:  False only when samples >= HEALTH_MIN_SAMPLES AND
                   score <= HEALTH_THRESHOLD AND
-                  failing_sessions >= HEALTH_MIN_SESSIONS
+                  failing_sessions >= min_sessions()
       - sessions: number of distinct sessions those records came from
       - failing_sessions: how many of those sessions had a scored failure
     Providers with no scored records do not appear (callers treat missing as healthy).
     """
     window = limit if limit is not None else HEALTH_WINDOW
+    need_sessions = min_sessions()
     records = read_history(limit=window * HEALTH_SCAN_FACTOR)   # newest first
 
     totals: dict[str, int] = defaultdict(int)
@@ -151,7 +189,7 @@ def provider_health(limit: int = None) -> dict[str, dict]:
     for pid, n in totals.items():
         score = successes[pid] / n if n else 1.0
         healthy = not (n >= HEALTH_MIN_SAMPLES and score <= HEALTH_THRESHOLD
-                       and len(failing[pid]) >= HEALTH_MIN_SESSIONS)
+                       and len(failing[pid]) >= need_sessions)
         snapshot[pid] = {
             "score": round(score, 3),
             "samples": n,

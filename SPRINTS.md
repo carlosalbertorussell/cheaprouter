@@ -7,6 +7,92 @@ One task per unit, PARTIAL-honest over DONE-false, closures noted inline.
 
 ## Active
 
+### ST6 — Retired-model failover and deterministic routing
+
+**Goal:** degrade gracefully the next time a provider retires a model (SC1d had
+to fix Groq's by hand because a 404 never failed over), make routing order
+independent of prices.json file order, and make health deprioritization work on
+a single-user stdio server without hand-tuning.
+
+**Delivered on this branch:**
+- **Model-unavailable failover** (`client.is_model_unavailable_error`). Only an
+  `httpx.HTTPStatusError` whose request path is a completion endpoint
+  (`/chat/completions`, `/messages`, `:generateContent`, `:streamGenerateContent`)
+  qualifies:
+  - 404 or 410 → true (the URL is fixed by prices.json, so "not found" means the
+    model or endpoint is gone);
+  - 400 → true only with a signal in the body: a code/type/status in
+    `model_not_found`, `model_decommissioned`, `model_deprecated`,
+    `model_not_available`, `model_unavailable`, `invalid_model`,
+    `not_found_error`, `not_found` (case-insensitive; covers OpenAI-compatible
+    APIs, Anthropic and Gemini `NOT_FOUND`), or a message containing "model"
+    plus "does not exist" / "not exist" / "not found" / "decommissioned" /
+    "deprecated" / "retired" / "no longer supported|available" / "invalid model"
+    / "unknown model" (DeepSeek "Model Not Exist", Mistral "Invalid model");
+  - 401/403, 422, 429, 5xx, anything else → false (429/5xx stay transient).
+  The body is read defensively (first 8 KiB; JSON, text, binary or unread all
+  handled) and only a bool comes out. Streamed error responses are now read
+  (`aread`) before raising so a streamed 400 can be classified. The failover loop
+  moves on for it in both modes (streaming only before the first token, as
+  before) within `max_failover`. Attempts gain `model_id` (all outcomes) and the
+  outcome `model_unavailable`; `routing.warnings` ("groq model X reported
+  unavailable; update prices.json") appears on success and on the all-failed
+  response. IDs come from prices.json, never the error body. `error_class` is
+  unchanged. History: cost 0, saved 0, `transient: false`.
+- **Health decision: model-unavailable does not count.** It is recorded
+  `transient: false`, which ST5 scoring ignores. Reasons: it is a
+  server-configuration problem the router already fails over and warns about;
+  and it is caller-triggerable (OpenAI-style APIs return `model_not_found` for a
+  key without model access), so counting it would give one caller a lever on
+  everyone's routing, breaking ST5's guarantee. Cost: until prices.json is fixed
+  every call pays one extra round trip to the retired provider. Documented in
+  `health.py`, SECURITY, MCPIZE_DOCS, README.
+- **Deterministic tie-break** (`pricing.ranking_key`): total cost, then
+  `latency_ms` (region latency class, lower first), then `provider_id`. Latency
+  chosen because on an exact cost tie it is the remaining property the caller
+  experiences; the cache rate is already priced into the total at the request's
+  cache split (preferring it would reward a discount this request doesn't use),
+  and context window / region label say nothing about which tied provider serves
+  this request better. Winners recomputed (`route()`, every key, 1000/500): fast
+  Groq gpt-oss-20b, balanced **Groq gpt-oss-120b** (now by latency 180 vs 390ms
+  over DeepSeek deepseek-flash, not file order), powerful Groq gpt-oss-120b — no
+  change, listing `--check` passes; README/MCPIZE_DOCS tie sentence updated.
+- **Single-user health default** (`health.min_sessions()`, read per call): an
+  explicit `HEALTH_MIN_SESSIONS` (int ≥ 1) wins; otherwise 1 when
+  `providers.is_local_transport()` (the ST4 marker set by `server.main()` before
+  `mcp.run(transport="stdio")`), else 2. The module constant is gone, so import
+  order can't freeze it. `arbitrage_provider_health` reports the effective value
+  in `thresholds.min_failing_sessions`. Over HTTP nothing changes; a stdio server
+  has one user, so there is no one else for a caller to poison.
+- **Owner decision recorded:** Qwen's `region` stays `cn` (Alibaba is
+  China-based; `BLOCKED_REGIONS=cn` keeps blocking it though the host is now
+  Singapore). No price changed.
+- Docs: README, MCPIZE_DOCS, ARCHITECTURE, SECURITY, SKILL.md, .env.example,
+  mcpize.yaml, CHANGELOG.
+
+**Tests:** `tests/test_model_unavailable.py` (classifier over Groq/OpenAI/
+Anthropic/Gemini/DeepSeek/Mistral shapes as 404 and 400, text/absent/binary/
+unread bodies; 401/403/422/plain 400/non-completion 404 negative; end to end over
+`httpx.MockTransport`: 404 then success, Groq 400 decommissioned, Anthropic and
+Gemini not-found, 401/403/400/422 not failing over, streaming before first token,
+`max_failover=0`, warning, history cost 0 / transient false, key and prompt absent
+from response and history, never counts against health),
+`tests/test_tiebreak.py` (25 shuffled file orders keep Groq first in balanced;
+full ranking identical across shuffles and cache splits; provider_id final key),
+`tests/test_health.py` (stdio 1, HTTP 2, env overrides both, malformed env,
+stdio single-session outage deprioritizes), `tests/test_server_tools.py`
+(effective value after `main(--stdio)` and with env). `tests/conftest.py` gains an
+autouse fixture starting every test as HTTP with no override. 515 tests pass
+(random order, four runs); coverage 96.4%.
+
+**Deferred:**
+- A retired model is not remembered: until prices.json is fixed, every call
+  first tries the retired provider (one extra round trip) and fails over. A
+  short-lived, server-side "skip this model" memory would need its own
+  abuse analysis (same caller-triggerable problem as health), so not done.
+- Qwen region-bound keys (SC1d follow-up): documented. CONNECT.md now asks for a
+  Singapore-region key (commit bcd2d2e). Per-key region support (SC4) is still open.
+
 ### SC1d — Groq migration + Qwen endpoint
 
 **Goal:** stop routing Groq callers to models Groq has shut down, and send Qwen
@@ -58,23 +144,27 @@ Groq rows and the Qwen host. 413 tests pass (random order, repeated); coverage 9
 providers re-read on 2026-11-01.
 
 **Deferred / follow-ups:**
-- **A model-not-found 404 should fail over** instead of ending the request (a
+- ~~**A model-not-found 404 should fail over** instead of ending the request (a
   retired model at one provider should not strand a caller who holds other keys),
   while bad keys (401/403) still do not fail over. Design change in `client.py` /
-  the failover loop, not done here.
+  the failover loop, not done here.~~ Done in ST6 (`is_model_unavailable_error`,
+  404s and model-unavailable 400s).
 - **Qwen keys are region-bound.** Callers with a China (Beijing) key now hit the
-  Singapore host and will fail; CONNECT.md still points at the China console.
-  Decide whether to document a Singapore key source or model region per key (SC4).
-- **Tie-break is implicit.** The balanced tie is decided by dict order in
+  Singapore host and will fail. **Documented:** CONNECT.md now asks for a
+  Singapore-region key (commit bcd2d2e). Supporting a region per key is still SC4.
+- ~~**Tie-break is implicit.** The balanced tie is decided by dict order in
   prices.json. If a deliberate rule is wanted (cache rate, latency), make it
-  explicit in `estimate_all_providers`.
+  explicit in `estimate_all_providers`.~~ Done in ST6 (cost, latency,
+  provider_id; Groq still wins balanced).
 - `notes.caching` and the cache-provider lists in README / MCPIZE_DOCS still say
   Groq bills cache at the full input rate; left for the ST5 merge, which owns that
   text.
 - Newer Qwen models (qwen3.7-flash ≤32K tiering, qwen3.7-plus promo ambiguity,
   qwen3.8-max) seen and not adopted; owner decision.
 - `region` for Qwen stays `cn` (vendor jurisdiction / `BLOCKED_REGIONS` semantics);
-  the Singapore host does not change that without a policy decision.
+  the Singapore host does not change that without a policy decision. **Decided:
+  keep cn (owner, 2026-11-14)** — Alibaba is China-based, so operators with
+  `BLOCKED_REGIONS=cn` keep blocking it. Recorded in ST6.
 
 ### ST5 — Abuse-resistant health and scoped reads
 
@@ -100,7 +190,7 @@ correctness fixes found in the ST4 review.
     `HEALTH_MIN_SESSIONS` (default 2) distinct sessions. Without this a caller
     flooding the shared recent list with its own 429s could push every other
     record out of the scan and leave only its capped failures. Single-user servers
-    set it to 1;
+    set it to 1 (since ST6 the default over local stdio);
   - `HEALTH_WINDOW` now counts *scored* records; up to `HEALTH_SCAN_FACTOR`
     (default 4) times as many raw records are read in the same one request, so
     ignored caller errors can't crowd real evidence out.
@@ -151,6 +241,9 @@ opt-in returns all; scoped reads unchanged; health still reads all sessions),
   caller's own key quota; the per-session cap and two-session rule bound it.
 - ~~**Groq and Qwen re-read** is a separate, human-verified step; not done in ST5.~~
   Done in SC1d (owner-verified Groq prices, Qwen re-read).
+- ~~**Single-user servers must set `HEALTH_MIN_SESSIONS=1` by hand** (over stdio
+  every call is `anon`, so the two-session rule never fires).~~ Done in ST6: 1 by
+  default over local stdio, 2 over HTTP, explicit env wins.
 
 ### ST4 — Hosted key safety, savings maths and docs accuracy
 
