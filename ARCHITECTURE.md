@@ -72,12 +72,12 @@ they are equivalent; the router picks the cheapest in the tier you ask for.
 
 ## Routing priority
 
-1. **Price** — primary sort key; cheapest eligible provider wins
+1. **Price** — primary sort key; cheapest eligible provider wins. Exact ties break on latency, then `provider_id` (`pricing.ranking_key`, ST6)
 2. **Availability** — providers without a supplied key are excluded
 3. **Latency** — when `latency_sensitive=true`, providers above the threshold (default 300ms) are dropped
 4. **Region** — `allowed_regions` / `BLOCKED_REGIONS` constrain the pool
-5. **Health** (S8) — providers failing recently are sunk behind *all* healthy ones, whatever their price; never excluded, so a blip can't strand a caller. Health is scored on the server's global history, shared across users, but counts only provider-side transient failures (never a caller's bad key or bad request), caps each session's contribution, and needs failures from at least two sessions (ST5)
-6. **Failover** (S2) — on a transient error the next provider in this order is tried, up to `max_failover`
+5. **Health** (S8) — providers failing recently are sunk behind *all* healthy ones, whatever their price; never excluded, so a blip can't strand a caller. Health is scored on the server's global history, shared across users, but counts only provider-side transient failures (never a caller's bad key or bad request), caps each session's contribution, and needs failures from at least two sessions (ST5; one over local stdio, ST6)
+6. **Failover** (S2) — on a transient error, or a model-unavailable error (`client.is_model_unavailable_error`, ST6), the next provider in this order is tried, up to `max_failover`
 
 ## BYOK & privacy invariants
 

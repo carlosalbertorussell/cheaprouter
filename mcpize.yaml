@@ -22,7 +22,7 @@ env:
   HEALTH_MIN_SAMPLES: "3"
   HEALTH_THRESHOLD: "0.5"
   HEALTH_MAX_PER_SESSION: "5"       # ST5: most records one session adds to a provider's score
-  HEALTH_MIN_SESSIONS: "2"          # ST5: distinct failing sessions needed to mark unhealthy
+  HEALTH_MIN_SESSIONS: "2"          # ST5: distinct failing sessions to mark unhealthy (HTTP default 2; stdio defaults to 1)
 
   # History reads (ST5) — "1" lets callers without a session read EVERY session's
   # records and spend. Off by default: no session reads only the shared anon session.

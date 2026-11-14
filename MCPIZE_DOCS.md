@@ -165,7 +165,7 @@ core tool — it selects the winner and makes the actual API call on your behalf
 | `allowed_regions` | array | — | `null` | Restrict to these regions |
 | `estimated_output_tokens` | integer | — | 500 | Used for pre-flight cost routing |
 | `health_aware` | boolean | — | `true` | Deprioritize providers with recent provider-side failures (never excludes) |
-| `max_failover` | integer | — | 2 | On a transient error (429/5xx/timeout), how many further providers to try in ranked order. 0 disables. |
+| `max_failover` | integer | — | 2 | On a transient error (429/5xx/timeout) or a retired/unavailable model, how many further providers to try in ranked order. 0 disables. |
 | `cached_input_tokens` | integer | — | 0 | Of the input tokens, how many are expected cache hits. Priced at each model's cache-read rate where `prices.json` has one (Anthropic, Gemini, Groq, Mistral, DeepSeek, Grok, qwen-max), which can change the cheapest choice. |
 | `stream` | boolean | — | `false` | Consume the provider's streaming endpoint. Lowers time-to-first-token (reported as `time_to_first_token_ms`); the full text still returns as one result. Failover applies only before the first token. Anthropic and OpenAI-compatible providers only; Gemini falls back to a normal call. |
 | `session` | string | — | `null` | Opaque token to attribute spend to (see Sessions below). Required for budget alerts |
@@ -205,10 +205,18 @@ These are list-price figures from `prices.json`, not your provider invoice.
 
 **Failover:** if the first-choice provider returns a transient error (rate limit,
 server error, or timeout), cheaprouter automatically retries the next provider in
-ranked order, up to `max_failover` times. Non-transient errors (bad key, malformed
-request) stop immediately, since they'd fail the same way everywhere. The response
-includes `failed_over` (bool) and an `attempts` list showing each provider tried
-and its outcome. Every transient failure (rate limit, server error, timeout,
+ranked order, up to `max_failover` times. The same happens when a provider says
+the *model* is retired or unavailable (a 404 from the completion endpoint, or a
+400 carrying `model_not_found`, `model_decommissioned`, `not_found_error`,
+`NOT_FOUND` or a "does not exist" / "deprecated" message): another provider serves
+a different model, so it is worth trying. Other non-transient errors (bad key,
+malformed request, 422) stop immediately, since they'd fail the same way
+everywhere. The response includes `failed_over` (bool) and an `attempts` list
+showing each provider tried, its model ID and its outcome (`success`,
+`transient_error`, `model_unavailable`, `error`, `mid_stream_error`). When any
+attempt was `model_unavailable`, `routing.warnings` says so, e.g. "groq model
+openai/gpt-oss-20b reported unavailable; update prices.json". A retired model is
+a server-configuration problem, so it does not count against provider health. Every transient failure (rate limit, server error, timeout,
 connection error) also feeds provider health tracking, so a provider having a bad
 spell gets deprioritized on subsequent calls; errors caused by the caller (bad
 key, bad request) never count against a provider. A failed
@@ -342,8 +350,13 @@ of the server, so it is built to resist one caller steering it:
 - Each session contributes at most 5 records per provider to the score
   (`HEALTH_MAX_PER_SESSION`); callers without a token share the `anon` session.
 - A provider is marked unhealthy only when its failures come from at least 2
-  distinct sessions (`HEALTH_MIN_SESSIONS`; a single-user server should set it
-  to 1).
+  distinct sessions over HTTP (`HEALTH_MIN_SESSIONS`). A local stdio server has
+  one user, so there the default is 1; an explicit `HEALTH_MIN_SESSIONS` always
+  wins. `arbitrage_provider_health` shows the effective value as
+  `thresholds.min_failing_sessions`.
+- A provider reporting its model retired or unavailable is not counted: that is a
+  configuration problem the router already fails over and warns about, and a
+  caller can trigger it with a key that lacks model access.
 - Failure records written before this change carry no transient flag and are
   not counted; successes from before it still are.
 
@@ -442,12 +455,12 @@ guess.
 
 Providers are selected using the following priority order:
 
-1. **Price** — always the primary signal; providers sorted cheapest-first for the given tier and token volume
+1. **Price** — always the primary signal; providers sorted cheapest-first for the given tier and token volume. Exact cost ties break on latency (lower first), then `provider_id`, so the order of `prices.json` never decides
 2. **Key availability** — providers without a supplied API key are excluded
 3. **Latency** — when `latency_sensitive: true`, providers with latency above 300ms are excluded (primarily affects DeepSeek and Qwen from outside Asia)
 4. **Region** — `allowed_regions` restricts the eligible pool to specific regions; useful for data residency requirements
-5. **Health** — when `health_aware: true` (default), providers whose recent success rate is at or below half are deprioritized: moved behind *all* healthy providers, whatever their price. They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. Health is scored on global history shared across users, counting only provider-side failures (never a caller's bad key or bad request), capping each session's contribution and needing failures from at least two sessions. `route_completion` reports any `deprioritized_providers` in its response.
-6. **Failover** — if the chosen provider returns a transient error, routing walks down the ranked pool to the next provider automatically (up to `max_failover`). This uses the same ordering health produces, so failover prefers healthy providers first.
+5. **Health** — when `health_aware: true` (default), providers whose recent success rate is at or below half are deprioritized: moved behind *all* healthy providers, whatever their price. They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. Health is scored on global history shared across users, counting only provider-side failures (never a caller's bad key or bad request), capping each session's contribution and needing failures from at least two sessions (one on a local stdio server). `route_completion` reports any `deprioritized_providers` in its response.
+6. **Failover** — if the chosen provider returns a transient error or reports the model retired or unavailable, routing walks down the ranked pool to the next provider automatically (up to `max_failover`). This uses the same ordering health produces, so failover prefers healthy providers first.
 
 **Prompt caching:** pass `cached_input_tokens` to price cache-hit input at each model's cache-read rate. `prices.json` models cache-read rates for Anthropic, Gemini, Groq, Mistral, DeepSeek, Grok and qwen-max, so on cache-heavy requests the cheapest provider can differ from the headline input-price ranking. OpenAI's cache rates are not published on its current pricing page and are omitted; OpenAI, qwen-flash and qwen-plus bill cached tokens at the full input rate, so they're never wrongly favoured.
 
@@ -509,7 +522,7 @@ excluded from routing. Start with one or two and add more as you get accounts.
 It depends on the tier and your keys. With every key supplied, no constraints and
 no cache, at 1,000 input / 500 output tokens the shipped table routes `tier_fast` to
 Groq openai/gpt-oss-20b, `tier_balanced` to Groq openai/gpt-oss-120b, and
-`tier_powerful` to Groq openai/gpt-oss-120b. `tier_balanced` is an exact tie with DeepSeek deepseek-flash (both 0.15/0.60); the sort is stable, so the provider listed first in `prices.json` (Groq) wins. With `latency_sensitive: true`
+`tier_powerful` to Groq openai/gpt-oss-120b. `tier_balanced` is an exact cost tie with DeepSeek deepseek-flash (both 0.15/0.60). Exact cost ties break on latency (lower first), then `provider_id`, never on the order of `prices.json`, so Groq (us, ~180ms) wins over DeepSeek (cn, ~390ms). With `latency_sensitive: true`
 DeepSeek and Qwen drop out and Groq wins all three tiers. Cache-heavy requests can
 favour DeepSeek or Anthropic. Run `arbitrage_estimate_cost` for your own volumes.
 
