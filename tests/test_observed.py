@@ -124,7 +124,10 @@ def test_router_emits_observed_only_when_enabled(route_env, be, monkeypatch, fla
     m = providers.PROVIDERS["groq"].models["tier_fast"]
     assert {r["field"] for r in rows} == {"input_price_per_1m", "output_price_per_1m"}
     assert all(r["provenance_tier"] == "observed" and r["provider"] == "groq" for r in rows)
-    assert all(r["model_id"] == "served-model" for r in rows)
+    # The table's model ID (so validation can match it), with the provider's
+    # reported ID kept apart (ST5).
+    assert all(r["model_id"] == m.model_id for r in rows)
+    assert all(r["served_model_id"] == "served-model" for r in rows)
     by = {r["field"]: r["new"] for r in rows}
     assert by == {"input_price_per_1m": m.input_price_per_1m,
                   "output_price_per_1m": m.output_price_per_1m}
@@ -146,3 +149,36 @@ def test_router_emit_failure_never_breaks_response(route_env, monkeypatch):
         messages=[{"role": "user", "content": "hi"}], api_keys={"groq": "sk-test-FAKE"},
         health_aware=False))))
     assert out["response"] == "ok"
+
+
+# ─── ST5: observed entries carry the table's model ID ─────────────────────────
+
+def test_record_observed_keeps_served_id_only_when_different(be):
+    ph.record_observed(provider="x", model_id="m", tier="tier_fast",
+                       observed_input_per_1m=1.0, served_model_id="m")
+    ph.record_observed(provider="x", model_id="m", tier="tier_fast",
+                       observed_input_per_1m=1.0, served_model_id="m-2026-11-01")
+    rows = be.read()                                  # newest first
+    assert rows[0]["served_model_id"] == "m-2026-11-01"
+    assert "served_model_id" not in rows[1]
+
+
+def test_router_observed_entries_match_the_table(route_env, be, monkeypatch):
+    """The provider answers with a dated snapshot ID; validation must still match."""
+    from client import CompletionResult
+    monkeypatch.setenv("ARBITRAGE_EMIT_OBSERVED", "1")
+
+    async def fake_call(provider, model, api_key, messages, system_prompt, max_tokens):
+        return CompletionResult(text="ok", input_tokens_used=10, output_tokens_used=5,
+                                latency_ms=1, model_id=model.model_id + "-2026-11-01",
+                                raw_response={})
+    s = route_env.server
+    monkeypatch.setattr(s, "call_provider", fake_call)
+    _run(s.arbitrage_route_completion(s.RouteCompletionInput(
+        messages=[{"role": "user", "content": "hi"}], tier="tier_fast",
+        api_keys={"groq": "sk-test-FAKE"}, health_aware=False)))
+    import json as _json, os
+    table = _json.loads(open(os.environ["ARBITRAGE_PRICES_FILE"]).read())
+    rep = refresh.observed_validation(table=table)
+    assert rep["summary"]["observed_points"] == 2
+    assert rep["summary"]["confirms"] == 2 and rep["any_divergence"] is False

@@ -40,7 +40,7 @@ HISTORY_FILE = Path(os.getenv("PRICE_HISTORY_FILE", str(Path(__file__).parent / 
 # Fields allowed in a history entry — the schema, enforced so nothing else leaks in.
 _ALLOWED = frozenset({
     "ts", "provider", "model_id", "tier", "field", "old", "new",
-    "provenance_tier", "source",
+    "provenance_tier", "source", "served_model_id",
 })
 
 
@@ -224,6 +224,7 @@ def record_observed(
     *, provider: str, model_id: str, tier: str,
     observed_input_per_1m: Optional[float] = None,
     observed_output_per_1m: Optional[float] = None,
+    served_model_id: Optional[str] = None,
     backend: Optional[HistoryBackend] = None,
 ) -> list[dict]:
     """
@@ -233,6 +234,11 @@ def record_observed(
     completion's real cost and token counts — NOT raw usage, and never content or
     keys. Stored with provenance_tier='observed', source='router'. Returns the
     entries written (one per field supplied).
+
+    `model_id` must be the price table's model ID (what prices.json lists), so
+    refresh.observed_validation can match the entry to a verified price. The ID
+    the provider reported back (often a dated snapshot of the same model) goes in
+    `served_model_id`, stored only when it differs (ST5).
     """
     be = backend or get_backend()
     out = []
@@ -242,6 +248,8 @@ def record_observed(
             continue
         e = build_entry(provider=provider, model_id=model_id, tier=tier, field=field,
                         old=None, new=float(val), provenance_tier="observed", source="router")
+        if served_model_id and served_model_id != model_id:
+            e["served_model_id"] = str(served_model_id)[:120]
         be.append(e)
         out.append(e)
     return out

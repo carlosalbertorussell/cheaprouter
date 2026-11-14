@@ -589,7 +589,11 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
             from price_history import record_observed
             record_observed(
                 provider=used.provider_id,
-                model_id=completion.model_id,
+                # The table's model ID, so observed_validation can match it
+                # against prices.json; the provider may answer with a dated
+                # snapshot ID, kept separately (ST5).
+                model_id=model.model_id,
+                served_model_id=completion.model_id,
                 tier=params.tier,
                 observed_input_per_1m=model.input_price_per_1m,
                 observed_output_per_1m=model.output_price_per_1m,
