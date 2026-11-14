@@ -7,6 +7,75 @@ One task per unit, PARTIAL-honest over DONE-false, closures noted inline.
 
 ## Active
 
+### SC1d — Groq migration + Qwen endpoint
+
+**Goal:** stop routing Groq callers to models Groq has shut down, and send Qwen
+calls to the region whose prices the table encodes. Triggered by a 2026-11-14
+re-read of the two providers SC1c carried.
+
+**Re-read 2026-11-14 (Groq and Qwen only):**
+- **Groq — migrated.** console.groq.com/docs/deprecations: `llama-3.1-8b-instant`
+  and `llama-3.3-70b-versatile` shut down 2026-08-16 for free and developer
+  accounts (enterprise only now, unpublished price). A BYOK developer key routed
+  there got a 404, which `client.py` treats as non-transient, so no failover.
+  Now `tier_fast` → `openai/gpt-oss-20b` 0.075/0.30, cache 0.037;
+  `tier_balanced`/`tier_powerful` → `openai/gpt-oss-120b` 0.15/0.60, cache 0.075;
+  ctx 131072. Prices from the console.groq.com/docs/model/openai/* pages, checked by
+  the owner on 2026-11-14. Cache is modelled because
+  console.groq.com/docs/prompt-caching lists both models; 0.037 (not 0.0375) is
+  what the 20b page shows. `pricing_urls.groq` → console.groq.com/docs/models; the
+  refresh block carries the per-tier model pages under `sources`. Refresh stays
+  `manual`: OpenRouter's gpt-oss price is the open model across hosts, not Groq's,
+  so an `openrouter` mapping would not be a sound comparison.
+- **Qwen — re-read, no price change.** alibabacloud.com/help/en/model-studio/model-pricing
+  (Singapore): qwen-flash 0.05/0.40, qwen-plus 0.40/1.20 non-thinking, qwen-max
+  1.60/6.40 (cache 0.32), all unchanged. `pricing_urls.qwen` fixed to that page
+  (`/models` has no prices). **Endpoint switched:**
+  https://www.alibabacloud.com/help/en/model-studio/base-url lists
+  `dashscope.aliyuncs.com` as China (Beijing) and `dashscope-intl.aliyuncs.com` as
+  Singapore, so `base_url` is now `https://dashscope-intl.aliyuncs.com/compatible-mode`
+  (`client.py` appends `/v1/chat/completions`, matching the documented
+  `.../compatible-mode/v1`). The OpenAI-compatibility page
+  (.../compatibility-of-openai-with-dashscope) agrees in its migration note.
+- **Provenance.** Table-wide `verified_at` stays 2026-11-01 (the other six were
+  not re-read). `verified_by` gained an SC1d sentence; the "CARRIED, NOT RE-READ"
+  flags for Groq and Qwen are gone from `verified_by` and `notes` (`groq_2026_11`
+  replaced by `groq_lifecycle`), so the listing marks both re-read.
+
+**Downstream:** MCPIZE_LISTING.md regenerated. README and MCPIZE_DOCS provider /
+tier tables, tier winners, pricing-page list and the carried sentence updated.
+Winners (`route()`, every key, 1000/500, health ignored): fast Groq gpt-oss-20b
+(0.000225 vs Qwen qwen-flash 0.00025), balanced Groq gpt-oss-120b, powerful Groq
+gpt-oss-120b (0.00045 vs DeepSeek v4-pro 0.00165). **Balanced is an exact tie**
+with DeepSeek deepseek-flash (both 0.15/0.60 → 0.00045); `estimate_all_providers`
+sorts on cost only and the sort is stable, so prices.json order (groq before
+deepseek) decides. Tests updated: cache-support and non-cache tests (Groq now has
+cache; OpenAI/Qwen used as the no-cache cases), cache-flip test (Qwen now wins
+200K-input fast without cache), listing winners/carried tests, new pins for the
+Groq rows and the Qwen host. 413 tests pass (random order, repeated); coverage 96.3%.
+
+**Carried:** Qwen context windows (not shown on the pricing page); the six
+providers re-read on 2026-11-01.
+
+**Deferred / follow-ups:**
+- **A model-not-found 404 should fail over** instead of ending the request (a
+  retired model at one provider should not strand a caller who holds other keys),
+  while bad keys (401/403) still do not fail over. Design change in `client.py` /
+  the failover loop, not done here.
+- **Qwen keys are region-bound.** Callers with a China (Beijing) key now hit the
+  Singapore host and will fail; CONNECT.md still points at the China console.
+  Decide whether to document a Singapore key source or model region per key (SC4).
+- **Tie-break is implicit.** The balanced tie is decided by dict order in
+  prices.json. If a deliberate rule is wanted (cache rate, latency), make it
+  explicit in `estimate_all_providers`.
+- `notes.caching` and the cache-provider lists in README / MCPIZE_DOCS still say
+  Groq bills cache at the full input rate; left for the ST5 merge, which owns that
+  text.
+- Newer Qwen models (qwen3.7-flash ≤32K tiering, qwen3.7-plus promo ambiguity,
+  qwen3.8-max) seen and not adopted; owner decision.
+- `region` for Qwen stays `cn` (vendor jurisdiction / `BLOCKED_REGIONS` semantics);
+  the Singapore host does not change that without a policy decision.
+
 ### ST4 — Hosted key safety, savings maths and docs accuracy
 
 **Goal:** a hosted server must never spend its operator's provider keys; the cost
@@ -67,8 +136,9 @@ coverage 96.6%.
 - **Health is global, not per user.** Any caller's failures, including bad-key
   401s, deprioritize a provider for everyone. Per-user (or per-key-hash) health
   is a follow-up.
-- **Groq and Qwen prices are still carried, not re-read.** They need a priced
-  source (console.groq.com; a priced Model Studio page).
+- ~~**Groq and Qwen prices are still carried, not re-read.** They need a priced
+  source (console.groq.com; a priced Model Studio page).~~ Done in SC1d
+  (2026-11-14).
 - **Business decisions CR-06 (Pro price / free-Pro boundary) and CR-03
   (liability for "certified")** are the owner's; PRICING_STRATEGY.md,
   TICKER_VISION.md and PRICING_SERVER_BLUEPRINT.md were not touched.
