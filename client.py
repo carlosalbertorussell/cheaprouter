@@ -32,9 +32,12 @@ def is_transient_error(exc: Exception) -> bool:
     timeouts, and connection errors — these are provider-specific and a different
     provider may well succeed.
 
-    Non-transient (fail immediately, no failover): auth errors (401/403) and bad
-    requests (400/404/422) — these reflect the key or the request itself and would
-    fail identically everywhere, so retrying just wastes calls.
+    Non-transient: auth errors (401/403) and bad requests (400/404/422) — these
+    reflect the key or the request itself and would fail identically everywhere,
+    so retrying just wastes calls. One exception is handled separately: a
+    provider reporting the *model* unavailable (is_model_unavailable_error, ST6)
+    is non-transient too, but the failover loop moves on for it, because another
+    provider serves a different model.
     """
     if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError,
                         httpx.RemoteProtocolError)):
@@ -45,6 +48,128 @@ def is_transient_error(exc: Exception) -> bool:
             return True
         return False   # 4xx other than 429 → not transient
     return False       # unknown error type → don't fail over blindly
+
+
+# ─── Model-unavailable classification (ST6) ──────────────────────────────────
+#
+# A provider that has retired or never had the model we asked for is a server
+# configuration problem (prices.json names a model the provider no longer
+# serves), not a caller error and not a provider outage. Another provider in the
+# same tier serves a different model, so failing over is safe and useful.
+
+# Structured error codes/types/statuses that mean "this model is not served".
+# OpenAI-compatible APIs (OpenAI, Groq, DeepSeek, Mistral, Grok, Qwen) put them in
+# error.code / error.type; Anthropic in error.type; Gemini in error.status.
+_MODEL_UNAVAILABLE_CODES = frozenset({
+    "model_not_found", "model_decommissioned", "model_deprecated",
+    "model_not_available", "model_unavailable", "invalid_model",
+    "not_found_error", "not_found",
+})
+
+# Phrases that, next to the word "model", mean the same in a free-text message.
+_MODEL_UNAVAILABLE_PHRASES = (
+    "does not exist", "not exist", "not found", "decommissioned", "deprecated",
+    "retired", "no longer supported", "no longer available", "invalid model",
+    "unknown model",
+)
+
+# Path suffixes of the completion endpoints this client calls.
+_COMPLETION_PATH_MARKERS = ("/chat/completions", "/messages", ":generatecontent",
+                            ":streamgeneratecontent")
+
+_MAX_ERROR_BODY_BYTES = 8192
+
+
+def _error_body(response: Optional[httpx.Response]) -> tuple[Optional[Any], str]:
+    """(parsed JSON or None, lower-cased text) of an error response, defensively.
+
+    Never raises: an unread streaming body, a missing response, binary or
+    non-UTF-8 content all yield (None, ""). Only the first 8 KiB is looked at.
+    """
+    if response is None:
+        return None, ""
+    try:
+        raw = response.content[:_MAX_ERROR_BODY_BYTES]
+    except Exception:          # httpx.ResponseNotRead, closed stream, ...
+        return None, ""
+    if not raw:
+        return None, ""
+    text = raw.decode("utf-8", errors="replace")
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        parsed = None
+    return parsed, text.lower()
+
+
+def _error_fields(parsed: Any) -> tuple[set[str], str]:
+    """Codes/types/statuses and the message from the common error-body shapes."""
+    codes: set[str] = set()
+    messages: list[str] = []
+    if not isinstance(parsed, dict):
+        return codes, ""
+    candidates = [parsed]
+    err = parsed.get("error")
+    if isinstance(err, dict):
+        candidates.append(err)
+    elif isinstance(err, str):
+        messages.append(err)
+    for obj in candidates:
+        for k in ("code", "type", "status"):
+            v = obj.get(k)
+            if isinstance(v, str) and v:
+                codes.add(v.strip().lower())
+        msg = obj.get("message")
+        if isinstance(msg, str):
+            messages.append(msg)
+    return codes, " ".join(messages).lower()
+
+
+def _mentions_unavailable_model(message: str) -> bool:
+    return "model" in message and any(p in message for p in _MODEL_UNAVAILABLE_PHRASES)
+
+
+def is_model_unavailable_error(exc: Exception) -> bool:
+    """
+    True if a provider said the requested *model* does not exist, was retired
+    or is otherwise not served — worth failing over to the next provider.
+
+    Rules (only httpx.HTTPStatusError from a completion endpoint qualifies):
+      - 404 or 410: true. The URL is fixed by prices.json, so "not found" on a
+        completion endpoint means the model (or the configured endpoint) is gone.
+      - 400: true only with a model-unavailable signal in the body — a known
+        code/type/status (model_not_found, model_decommissioned, not_found_error,
+        NOT_FOUND, invalid_model, ...) or a message that mentions "model" with a
+        phrase such as "does not exist", "decommissioned" or "deprecated". Groq
+        and DeepSeek report retired models as a 400. Any other 400 is a bad
+        request and would fail the same way everywhere.
+      - 401/403 (bad key), 422, 429, 5xx and everything else: false. 429/5xx are
+        handled by is_transient_error.
+    The body may be JSON, text or absent; it is parsed defensively and only to
+    return a bool. Nothing from it (nor the URL, which can carry a Gemini key) is
+    returned, stored or logged.
+    """
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return False
+    response = exc.response
+    code = getattr(response, "status_code", None)
+    if code not in (400, 404, 410):
+        return False
+    try:
+        path = (exc.request.url.path or "").lower()
+    except Exception:          # no request attached
+        path = ""
+    if not any(path.endswith(m) for m in _COMPLETION_PATH_MARKERS):
+        return False
+    if code in (404, 410):
+        return True
+    parsed, text = _error_body(response)
+    codes, message = _error_fields(parsed)
+    if codes & _MODEL_UNAVAILABLE_CODES:
+        return True
+    if parsed is None:
+        message = text           # plain-text body
+    return _mentions_unavailable_model(message)
 
 
 @dataclass
@@ -229,6 +354,9 @@ async def _call_gemini(
 # providers); Gemini's streaming uses a different framing and is not covered here,
 # so stream_supported() reports which providers can stream.
 #
+# Error bodies: a streamed error response is read (it is small) before raising,
+# so is_model_unavailable_error can see a 400's error code (ST6).
+#
 # Failover note (see server.py): failover is only safe BEFORE the first chunk.
 # Once any token has been yielded the caller may have seen partial output, so a
 # mid-stream error is terminal — never silently retried on another provider.
@@ -243,6 +371,17 @@ class StreamChunk:
     input_tokens_used: int = 0        # populated on/near the final frame when available
     output_tokens_used: int = 0
     model_id: str = ""
+
+
+async def _raise_for_status_with_body(r: httpx.Response) -> None:
+    """raise_for_status for a streamed response, reading an error body first so
+    the classifier can inspect it. A failed read still raises the status error."""
+    if r.is_error:
+        try:
+            await r.aread()
+        except Exception:
+            pass
+    r.raise_for_status()
 
 
 def stream_supported(protocol: str) -> bool:
@@ -297,7 +436,7 @@ async def _stream_anthropic(provider, model, api_key, messages, system_prompt, m
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         async with client.stream("POST", f"{provider.base_url}/v1/messages",
                                  headers=headers, json=body) as r:
-            r.raise_for_status()
+            await _raise_for_status_with_body(r)
             async for line in r.aiter_lines():
                 if not line.startswith("data:"):
                     continue
@@ -350,7 +489,7 @@ async def _stream_openai_compat(provider, model, api_key, messages, system_promp
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         async with client.stream("POST", f"{provider.base_url}/v1/chat/completions",
                                  headers=headers, json=body) as r:
-            r.raise_for_status()
+            await _raise_for_status_with_body(r)
             async for line in r.aiter_lines():
                 if not line.startswith("data:"):
                     continue
