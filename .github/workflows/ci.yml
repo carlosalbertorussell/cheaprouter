@@ -25,13 +25,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio
+          pip install pytest pytest-asyncio pytest-cov
 
       - name: Compile check
-        run: python -m py_compile server.py providers.py pricing_table.py pricing.py router.py client.py history.py storage.py health.py
+        run: python -m py_compile *.py scripts/*.py
 
-      - name: Run tests
-        run: python -m pytest tests/ -v
+      - name: Run tests with coverage
+        # No network: tests/conftest.py fails any test that opens a real httpx
+        # connection. The floor sits a few points below the measured total
+        # (96.6% at ST1) so it catches lost coverage without flaking.
+        run: >-
+          python -m pytest tests/ -v
+          --cov=client --cov=health --cov=history --cov=price_history
+          --cov=pricing --cov=pricing_server --cov=pricing_table --cov=providers
+          --cov=provenance --cov=refresh --cov=router --cov=server --cov=storage
+          --cov=tokens
+          --cov-report=term-missing
+          --cov-fail-under=92
 
   price-freshness:
     # Non-blocking: surfaces stale prices as a visible signal without failing the
