@@ -1,0 +1,77 @@
+name: Daily price-drift check
+
+# SC7: compares prices.json against the OpenRouter feed once a day, out-of-band
+# (never on the request path). On significant drift it opens or updates ONE PR
+# from `automation/price-drift` with the proposed prices.json; a human verifies
+# every number on the provider's page, updates verified_at/verified_by, and
+# merges. Nothing here merges, auto-merges or approves. It also opens one
+# `price-expiry` issue when the table is close to its 45-day expiry.
+#
+# PRs opened with GITHUB_TOKEN do not trigger CI. Re-run CI by pushing a human
+# commit to the branch (e.g. the verified_at update), or close and reopen the PR.
+# Requires Settings → Actions → General → "Allow GitHub Actions to create and
+# approve pull requests". See README "Daily drift check".
+
+on:
+  schedule:
+    - cron: "37 5 * * *"   # daily 05:37 UTC (off the hour to avoid the :00 rush)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write        # push the automation/price-drift branch
+  pull-requests: write   # open / edit / comment on the drift PR
+  issues: write          # price-expiry issue and labels
+
+concurrency:
+  group: price-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Always propose against the default branch, even on a manual run
+          # started from another branch.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run drift check
+        id: drift
+        # Exit 10 (significant drift) is an expected outcome, not a failure:
+        # capture the code and let the next step decide.
+        run: |
+          code=0
+          python scripts/drift_check.py \
+            --json-out "$RUNNER_TEMP/drift.json" \
+            --md-out "$RUNNER_TEMP/drift.md" \
+            --write-proposal "$RUNNER_TEMP/prices.proposed.json" || code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          if [ -f "$RUNNER_TEMP/drift.md" ]; then
+            cat "$RUNNER_TEMP/drift.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "drift_check.py exited $code"
+
+      - name: Open or update the drift PR / expiry issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRIFT_EXIT: ${{ steps.drift.outputs.exit_code }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          python scripts/drift_pr.py \
+            --exit-code "$DRIFT_EXIT" \
+            --json "$RUNNER_TEMP/drift.json" \
+            --md "$RUNNER_TEMP/drift.md" \
+            --proposal "$RUNNER_TEMP/prices.proposed.json" \
+            --base "$BASE_BRANCH"
