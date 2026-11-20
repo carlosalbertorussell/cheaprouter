@@ -7,6 +7,100 @@ One task per unit, PARTIAL-honest over DONE-false, closures noted inline.
 
 ## Active
 
+### SC7 — Daily drift check and expiry warning
+
+**Goal:** close the one loose loop in the freshness contract. Drift-checking was
+on-demand (`scripts/refresh_prices.py`) and the 45-day expiry was a manual chore, so
+a real repricing was caught only when someone remembered. SC7 runs the SC2 drift
+check **out-of-band** once a day in GitHub Actions and surfaces only **significant**
+drift (threshold-gated) as one PR. There is **no hot-path polling**: LLM prices move
+over weeks, so per-call polling would add latency to every request and replace
+verified prices with unprovenanced scrapes. **A human still verifies** every number
+on the provider's page and stamps `verified_at`/`verified_by` before merging, so
+provenance holds. Nothing on the request path changed.
+
+**Delivered:**
+- **Engine** (end of `refresh.py`, pure functions over a `check_drift()` report):
+  significant vs minor classification (`|feed − table| / table × 100 ≥ 5%` by
+  default; a table 0 with a non-zero feed is significant), expiry status
+  (`expires_on` = `verified_at` + `max_age_days`, warning at ≤ 10 days), a
+  fingerprint of the significant set (`provider|tier|field|table|feed`), the PR body
+  (changes table, per-change verification checklist with `pricing_urls`, bold
+  proxy-provenance warning, minor / fetch-failed / manual lists, expiry, hidden
+  fingerprint marker), and a proposal that applies only significant changes,
+  formatted byte-for-byte like prices.json. Only `openrouter`-strategy providers
+  can be proposed; manual ones (Groq, Qwen) are listed for a manual check;
+  `fetch_failed` is never drift.
+- **CLI** `scripts/drift_check.py` (`--threshold-pct`, `--expiry-warn-days`,
+  `--json-out`, `--md-out`, `--write-proposal`). Exit 0 no significant drift, 10
+  significant drift, 2 invalid table or the feed failed for every OpenRouter
+  provider (the JSON still carries the expiry fields when the table is valid), 1
+  unexpected.
+- **Workflow** `.github/workflows/price-drift.yml`: daily at 05:37 UTC and on
+  `workflow_dispatch`; `contents`/`pull-requests`/`issues` write only; checkout
+  without persisted credentials (git authenticates via `gh auth setup-git`).
+- **GitHub side** `scripts/drift_pr.py`, all `gh`/`git` calls through an injectable
+  runner (argv lists, bodies by file, no shell): one PR from `automation/price-drift`
+  labelled `price-drift` + `needs-human-verification`; a fingerprint already on any
+  drift PR (open, closed or merged) means do nothing; human commits on the branch
+  are never reset (one comment about the newer drift instead); a run whose base
+  moved after checkout is skipped; one "drift cleared" comment per PR; one
+  `price-expiry` issue per expiry date, older ones closed. It never merges,
+  auto-merges or approves, and refuses a proposal that touches `verified_at`,
+  `verified_by` or adds `_candidate`.
+- Docs: README "Daily drift check (SC7)", `refresh_prices.py` points to the new CLI.
+
+**How it was built:** two builders worked in parallel against a shared interface
+contract (CLI flags, exit codes, JSON shape, PR-body requirements): one built the
+engine and CLI, the other the workflow and `drift_pr.py`. The coordinator merged
+both and ran the whole flow end to end against a throwaway local git origin (real
+git, faked `gh`). An independent review then found seven issues, all fixed here
+with a failing test first:
+1. Odd feed values became prices (`"-1"` → −1,000,000, `"inf"` → invalid JSON,
+   `true` → 1,000,000, `"0"` → free). Now only finite numbers > 0 count, booleans
+   rejected; an unusable field is a failed lookup like a missing model id (other
+   fields still compared; no usable change → `fetch_failed`); the proposal writer
+   refuses non-finite or non-positive values.
+2. A rejected (closed) drift PR was re-opened daily: PRs are now looked up in any
+   state.
+3. The README told humans to push their `verified_at` commit, but a newer drift
+   force-pushed over it: human commits now stop the reset (one deduped comment
+   instead; the reset push is leased on the inspected tip).
+4. A base that moved during the run could be reverted: the run is skipped.
+5. The fingerprint ignored the table value: now included.
+6. `default_branch` can be empty on `schedule` events: falls back to
+   `github.ref_name` (gh lookup kept as the last fallback).
+7. Exit 2 now still handles the expiry issue (job still fails); the expiry body has
+   no daily countdown; "drift cleared" once per PR; `persist-credentials: false`
+   with `gh auth setup-git`.
+
+**One-time GitHub setting (owner):** Settings → Actions → General → Workflow
+permissions → enable **"Allow GitHub Actions to create and approve pull
+requests"**. Without it `gh pr create` fails. (The workflow never approves; the
+setting is needed only to create the PR.)
+
+**Known limitation:** PRs opened with `GITHUB_TOKEN` don't trigger other workflows,
+so CI does not run on the drift PR until a human pushes to the branch (the
+`verified_at`/`verified_by` commit is the natural one) or closes and reopens it.
+
+**Tests:** `tests/test_drift_check.py` (classification, threshold boundary, table 0,
+fingerprint incl. table value, expiry maths, byte-identical proposal, Markdown, CLI
+exit codes with a stubbed feed, odd feed values, proposal guard) and
+`tests/test_drift_pr.py` (fake runner: create/update/no-op by fingerprint across
+open/closed/merged PRs, human-commit protection, base moved, credential helper,
+clear comment, exit-code handling incl. expiry on exit 2, expiry issue dedupe and
+stable body, workflow file checks). 635 tests pass (random order, several runs);
+coverage 96.8%. No network in tests; no price changed.
+
+**Deferred:**
+- **Fast-track** for providers whose feed provenance is accepted: needs an owner
+  decision; not built.
+- **Second-proxy cross-check** (e.g. a Price-Per-Token MCP) to flag where
+  OpenRouter diverges from provider-direct: not built.
+- **Retire the weekly `price-check.yml`** after a few green weeks of the daily
+  check. Kept for now: it needs no network, so it still reports staleness during a
+  feed outage.
+
 ### SC1e — Full price re-check (2026-11-14)
 
 **Goal:** re-read every provider before the table expired on 2026-12-16 and move
@@ -714,7 +808,11 @@ the two forces that fight each other; this sequence resolves them.
   residency guarantees a raw provider API doesn't). Relates to SC4 (jurisdictional
   pricing).
 
-- **SC7 — Freshness SLA / auto-refresh loop.** The "best execution" question:
+- ~~**SC7 — Freshness SLA / auto-refresh loop.**~~ **Done 2026-11-20** — see
+  "SC7 — Daily drift check and expiry warning" under Active (daily threshold-gated
+  drift PR + expiry issue; fast-track and the second-proxy cross-check deferred).
+  Original entry kept below for the rationale.
+  The "best execution" question:
   guarantee routing is always against near-current prices *without* per-call
   polling. Per-call polling is the wrong mechanism and is explicitly rejected: it
   adds hundreds of ms–seconds of blocking I/O to the hot path (undoing S5's TTFT
