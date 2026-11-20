@@ -648,3 +648,24 @@ def test_workflow_checkout_does_not_persist_credentials():
         assert checkout["with"]["fetch-depth"] == 0
     # The token reaches git only through gh's credential helper, never a URL or echo.
     assert "x-access-token" not in text and not re.search(r"echo[^\n]*TOKEN", text)
+
+
+def test_exit_2_expiry_failure_is_reported_and_still_fails(env, capsys):
+    class Failing(FakeRunner):
+        def __call__(self, cmd, cwd=None):
+            res = super().__call__(cmd, cwd)
+            return drift_pr.Result(1, "", "gh down") if cmd[:3] == ["gh", "issue", "create"] else res
+    assert env(2, Failing(), expiry_warning=True) == 1
+    assert "gh down" in capsys.readouterr().out
+
+
+def test_empty_base_branch_falls_back_to_gh(env):
+    # BASE_BRANCH can still be empty if both expressions are; gh is the last fallback.
+    env(10, FakeRunner())
+    out = env.repo.parent / "out"
+    r = FakeRunner()
+    assert drift_pr.main(["--exit-code", "10", "--json", str(out / "drift.json"),
+                          "--md", str(out / "drift.md"), "--proposal", str(env.proposal),
+                          "--repo-dir", str(env.repo), "--base", ""], runner=r) == 0
+    assert r.find("gh", "repo", "view")
+    assert ["git", "checkout", "-B", "automation/price-drift", "origin/main"] in r.calls
