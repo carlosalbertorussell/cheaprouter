@@ -256,15 +256,27 @@ out-of-band; nothing on the request path changes. It runs
 
 - **Significant drift** (exit 10): it opens one PR from `automation/price-drift`
   with labels `price-drift` and `needs-human-verification`, or updates the open
-  one. If nothing changed since the last run (same fingerprint), it does nothing.
-  The branch belongs to the automation and is force-pushed on each update, so don't
-  build on it.
+  one. If any drift PR, open, closed or merged, already carries the same
+  fingerprint, it does nothing, so closing the PR rejects that drift for good; only
+  a different drift (a new feed number, or a table value changed on the default
+  branch) opens a new PR.
+- **Your commits on the drift branch are safe.** While the branch holds only the
+  automation's commit, a newer drift resets and force-pushes it. Once anyone else
+  has pushed a commit to it (your `verified_at`/`verified_by` update, or corrected
+  numbers), the automation never resets or pushes it again: it posts one comment
+  listing the newer drift and asks you to reconcile it by hand (or close the PR so
+  the newer drift is proposed afresh).
+- **Default branch moved during the run:** it skips that run (the job still
+  succeeds) rather than proposing against an old base; the next run uses the new
+  one.
 - **Drift cleared** (exit 0): it comments once on the open drift PR and leaves it
   open.
-- **Table invalid or feed down everywhere** (exit 2): the job fails and nothing
-  is opened.
+- **Table invalid or feed down everywhere** (exit 2): the job fails and no PR is
+  opened. The expiry issue below is still handled when the table is valid, so a
+  long feed outage does not hide the expiry.
 - **Near expiry:** it opens one `price-expiry` issue, "Price table expires on
-  <date>", and closes older ones.
+  <date>", and closes older ones. The body gives the expiry date, not a daily
+  countdown, so it changes only when the dates do.
 
 The proposed numbers come from the OpenRouter feed, so they are proxy
 provenance, not verified prices. **Before merging, a human must check every number
@@ -280,7 +292,9 @@ as a human.
 One-time setup: under Settings → Actions → General → Workflow permissions, enable
 **"Allow GitHub Actions to create and approve pull requests"**. Without it,
 `gh pr create` fails. The workflow requests only `contents`, `pull-requests` and
-`issues` write.
+`issues` write. The checkout does not persist credentials; git reaches GitHub
+through `gh auth setup-git`, which reads the job token from `GH_TOKEN` and never
+prints it.
 
 To run it manually, go to Actions → "Daily price-drift check" → Run workflow, or
 run `gh workflow run price-drift.yml`.
@@ -297,6 +311,10 @@ python scripts/drift_check.py --json-out drift.json --md-out drift.md \
 - **Significant** means `|feed - table| / table × 100 ≥ --threshold-pct` (default 5).
   A table price of 0 with a non-zero feed price is always significant. Only
   significant changes go into the proposal.
+- Only finite prices above zero count. A feed value such as `"-1"` (OpenRouter's
+  variable-price marker), `"0"`, `"inf"`, `"nan"` or `true` is a failed lookup for
+  that field, never drift: the provider's other fields are still compared, and a
+  provider with nothing usable is listed as fetch-failed.
 - **Minor** drifts are below the threshold. They are listed in the report and never
   proposed.
 - Manual providers (Groq, Qwen) and providers whose feed lookup failed are listed

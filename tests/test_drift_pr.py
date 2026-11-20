@@ -20,18 +20,27 @@ FP_NEW = "b" * 64
 
 # Commands that only read state. Anything else counts as a change.
 READ_ONLY = {("gh", "pr", "list"), ("gh", "pr", "view"), ("gh", "issue", "list"),
-             ("gh", "label", "list"), ("gh", "repo", "view"), ("git", "diff", "--quiet")}
+             ("gh", "label", "list"), ("gh", "repo", "view")}
+READ_ONLY_GIT = {"diff", "rev-parse", "log"}
+
+BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
+SHA_START = "1" * 40     # the commit the job checked out (and drift_check read)
+SHA_BRANCH = "2" * 40    # tip of origin/automation/price-drift
 
 
 class FakeRunner:
-    def __init__(self, prs=None, comments=None, issues=None, labels=None, diff_rc=1):
+    def __init__(self, prs=None, comments=None, issues=None, labels=None, diff_rc=1,
+                 base_sha=SHA_START, branch_authors=None):
         self.calls: list[list[str]] = []
         self.files: dict[int, str] = {}  # call index -> --body-file / -F content
-        self.prs = prs or []
+        # gh pr list --state all: PRs without an explicit state are open.
+        self.prs = [dict({"state": "OPEN"}, **p) for p in (prs or [])]
         self.comments = comments or []
         self.issues = issues or []
         self.labels = labels or []
         self.diff_rc = diff_rc
+        self.base_sha = base_sha            # origin/<base> after the fetch
+        self.branch_authors = branch_authors if branch_authors is not None else [BOT_EMAIL]
 
     def __call__(self, cmd, cwd=None):
         cmd = list(cmd)
@@ -53,10 +62,20 @@ class FakeRunner:
             return drift_pr.Result(0, "main\n")
         if cmd[:2] == ["git", "diff"]:
             return drift_pr.Result(self.diff_rc)
+        if cmd[:2] == ["git", "rev-parse"]:
+            ref = cmd[-1]
+            if ref == "HEAD":
+                return drift_pr.Result(0, SHA_START + "\n")
+            if ref.endswith("/" + drift_pr.BRANCH):
+                return drift_pr.Result(0, SHA_BRANCH + "\n")
+            return drift_pr.Result(0, self.base_sha + "\n")
+        if cmd[:2] == ["git", "log"]:
+            return drift_pr.Result(0, "".join(a + "\n" for a in self.branch_authors))
         return drift_pr.Result(0)
 
     def mutating(self):
-        return [c for c in self.calls if tuple(c[:3]) not in READ_ONLY]
+        return [c for c in self.calls if tuple(c[:3]) not in READ_ONLY
+                and not (c[0] == "git" and c[1] in READ_ONLY_GIT)]
 
     def find(self, *prefix):
         return [c for c in self.calls if c[:len(prefix)] == list(prefix)]
@@ -119,6 +138,7 @@ def test_drift_no_open_pr_creates_branch_commit_push_and_pr(env):
     m = r.mutating()
     kinds = [c[:2] if c[0] == "git" else c[:3] for c in m]
     assert kinds == [
+        ["gh", "auth", "setup-git"],
         ["git", "fetch"], ["git", "checkout"], ["git", "config"], ["git", "config"],
         ["git", "add"], ["git", "commit"], ["git", "push"],
         ["gh", "label", "create"], ["gh", "label", "create"], ["gh", "pr", "create"],
@@ -154,11 +174,113 @@ def test_drift_same_fingerprint_changes_nothing(env):
     assert (env.repo / "prices.json").read_text() == before
 
 
+@pytest.mark.parametrize("state", ["CLOSED", "MERGED"])
+def test_drift_closed_or_merged_pr_with_same_fingerprint_is_not_reopened(env, state):
+    # A human rejected (closed) the drift PR, or merged a different value: the
+    # same drift must not come back as a new PR every day.
+    r = FakeRunner(prs=[{"number": 7, "url": "u", "state": state,
+                         "body": f"x\n<!-- sc7-fingerprint: {FP_NEW} -->\n"}])
+    assert env(10, r) == 0
+    lst = r.find("gh", "pr", "list")[0]
+    assert lst[lst.index("--state") + 1] == "all"
+    assert r.mutating() == []
+    assert not any(c[0] == "git" for c in r.calls)
+
+
+def test_drift_same_fingerprint_on_an_older_closed_pr_is_not_reopened(env):
+    r = FakeRunner(prs=[{"number": 9, "url": "u", "state": "CLOSED",
+                         "body": f"<!-- sc7-fingerprint: {FP_OLD} -->"},
+                        {"number": 7, "url": "u", "state": "CLOSED",
+                         "body": f"<!-- sc7-fingerprint: {FP_NEW} -->"}])
+    assert env(10, r) == 0
+    assert r.mutating() == []
+
+
+def test_drift_closed_pr_with_different_fingerprint_opens_a_new_pr(env):
+    r = FakeRunner(prs=[{"number": 7, "url": "u", "state": "CLOSED",
+                         "body": f"<!-- sc7-fingerprint: {FP_OLD} -->"}],
+                   labels=["price-drift", "needs-human-verification"])
+    assert env(10, r) == 0
+    assert len(r.find("gh", "pr", "create")) == 1
+    assert r.find("gh", "pr", "edit") == []         # the closed PR is left alone
+    assert r.find("gh", "pr", "comment") == []
+    assert r.find("git", "push")[0][2] == "--force"
+    _no_merge(r)
+
+
+# ── human commits on the drift branch (review finding 3) ─────────────────────
+
+def test_drift_branch_with_human_commit_is_not_reset_and_gets_one_comment(env):
+    pr = {"number": 7, "url": "u", "body": f"<!-- sc7-fingerprint: {FP_OLD} -->"}
+    r = FakeRunner(prs=[pr], branch_authors=[BOT_EMAIL, "alice@example.com"])
+    before = (env.repo / "prices.json").read_text()
+    assert env(10, r) == 0
+    assert r.find("git", "checkout") == [] and r.find("git", "commit") == []
+    assert r.find("git", "push") == [] and r.find("gh", "pr", "edit") == []
+    assert (env.repo / "prices.json").read_text() == before
+    comments = r.find("gh", "pr", "comment")
+    assert len(comments) == 1 and comments[0][3] == "7" and "--body-file" in comments[0]
+    text = r.files[r.calls.index(comments[0])]
+    assert f"<!-- sc7-newer-drift: {FP_NEW} -->" in text
+    assert "openai" in text and "input_price_per_1m" in text and "0.1 → 0.12" in text
+    assert "reconcile" in text
+    _no_merge(r)
+
+    # Next day, same newer drift: the marker dedupes the comment.
+    r2 = FakeRunner(prs=[pr], branch_authors=["alice@example.com"],
+                    comments=[{"body": text}, {"body": "human: looking"}])
+    assert env(10, r2) == 0
+    assert r2.find("gh", "pr", "comment") == [] and r2.find("git", "push") == []
+
+
+def test_drift_branch_with_only_automation_commits_is_reset(env):
+    r = FakeRunner(prs=[{"number": 7, "url": "u", "body": f"<!-- sc7-fingerprint: {FP_OLD} -->"}],
+                   branch_authors=[BOT_EMAIL, BOT_EMAIL.upper()])
+    assert env(10, r) == 0
+    assert ["git", "checkout", "-B", "automation/price-drift", "origin/main"] in r.calls
+    assert len(r.find("git", "push")) == 1 and len(r.find("gh", "pr", "edit")) == 1
+    assert r.find("gh", "pr", "comment") == []
+
+
+# ── base moved during the run (review finding 4) ─────────────────────────────
+
+def test_drift_skips_when_base_moved_since_checkout(env, capsys):
+    r = FakeRunner(base_sha="3" * 40)
+    before = (env.repo / "prices.json").read_text()
+    assert env(10, r, expiry_warning=True) == 0
+    assert r.find("git", "checkout") == [] and r.find("git", "push") == []
+    assert r.find("gh", "pr", "create") == [] and r.find("gh", "issue", "create") == []
+    assert (env.repo / "prices.json").read_text() == before
+    out = capsys.readouterr().out
+    assert "moved" in out and "next run" in out
+    # It compared the checked-out commit with origin/main after fetching it.
+    fetch = r.calls.index(r.find("git", "fetch")[0])
+    assert r.calls.index(["git", "rev-parse", "HEAD"]) < fetch
+    assert r.calls.index(["git", "rev-parse", "origin/main"]) > fetch
+
+
+# ── push credentials (review finding 7) ──────────────────────────────────────
+
+def test_push_uses_gh_credential_helper_set_up_first(env):
+    r = FakeRunner()
+    assert env(10, r) == 0
+    setup = r.calls.index(["gh", "auth", "setup-git"])
+    assert setup < r.calls.index(r.find("git", "fetch")[0])
+    assert setup < r.calls.index(r.find("git", "push")[0])
+    # The token is never put on a command line.
+    assert not any("GH_TOKEN" in a or "x-access-token" in a for c in r.calls for a in c)
+
+
 def test_drift_new_fingerprint_updates_branch_and_edits_body(env):
     r = FakeRunner(prs=[{"number": 7, "url": "u", "body": f"<!-- sc7-fingerprint: {FP_OLD} -->"}],
                    labels=["price-drift", "needs-human-verification"])
     assert env(10, r) == 0
-    assert len(r.find("git", "push")) == 1
+    pushes = r.find("git", "push")
+    # Only automation commits on the branch: it is reset, and the push is leased on
+    # the tip we inspected, so a human push in between is never overwritten.
+    assert pushes == [["git", "push", f"--force-with-lease=refs/heads/automation/price-drift:{SHA_BRANCH}",
+                       "origin", "HEAD:refs/heads/automation/price-drift"]]
+    assert r.find("git", "log")[0][-1] == "origin/main..origin/automation/price-drift"
     assert r.find("gh", "pr", "create") == []
     edits = r.find("gh", "pr", "edit")
     assert len(edits) == 1 and edits[0][3] == "7"
@@ -253,11 +375,17 @@ def test_clear_comments_once_on_open_pr(env):
     assert r2.mutating() == []
 
 
-def test_clear_comments_again_if_a_later_comment_followed(env):
+def test_clear_comments_once_per_pr_even_after_later_comments(env):
     r = FakeRunner(prs=[{"number": 7, "url": "u", "body": ""}],
                    comments=[{"body": drift_pr.CLEARED_MARKER}, {"body": "human: reopened drift?"}])
     assert env(0, r) == 0
-    assert len(r.find("gh", "pr", "comment")) == 1
+    assert r.find("gh", "pr", "comment") == []
+
+
+def test_clear_ignores_closed_drift_prs(env):
+    r = FakeRunner(prs=[{"number": 7, "url": "u", "body": "", "state": "CLOSED"}])
+    assert env(0, r) == 0
+    assert r.mutating() == []
 
 
 def test_clear_without_open_pr_does_nothing(env):
@@ -269,13 +397,38 @@ def test_clear_without_open_pr_does_nothing(env):
 
 # ── exit 2 / other ───────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("code", [2, 1, 3])
+@pytest.mark.parametrize("code", [1, 3])
 def test_failure_exit_codes_fail_and_create_nothing(env, code, capsys):
     r = FakeRunner(prs=[{"number": 7, "url": "u", "body": ""}])
     assert env(code, r, expiry_warning=True) == 1
     assert r.calls == []
     out = capsys.readouterr().out
     assert "::error::" in out and "No PR or issue was opened" in out
+
+
+def test_exit_2_fails_but_still_handles_expiry(env, capsys):
+    # A long feed outage must not hide the expiry: the job fails (exit 1), no PR
+    # is touched, but the price-expiry issue is still opened.
+    r = FakeRunner(prs=[{"number": 7, "url": "u", "body": ""}])
+    assert env(2, r, expiry_warning=True) == 1
+    assert len(r.find("gh", "issue", "create")) == 1
+    assert not any(c[:2] == ["gh", "pr"] for c in r.calls)
+    assert not any(c[0] == "git" for c in r.calls)
+    out = capsys.readouterr().out
+    assert "::error::" in out and "No drift PR was opened" in out
+
+
+def test_exit_2_with_invalid_table_json_touches_nothing(env, tmp_path):
+    (tmp_path / "err.json").write_text('{"error": "price table invalid: x"}')
+    (tmp_path / "err.md").write_text("failed\n")
+    r = FakeRunner()
+    assert drift_pr.main(["--exit-code", "2", "--json", str(tmp_path / "err.json"),
+                          "--md", str(tmp_path / "err.md"), "--proposal", "x"], runner=r) == 1
+    assert r.mutating() == []
+    # And with no JSON at all.
+    assert drift_pr.main(["--exit-code", "2", "--json", str(tmp_path / "none.json"),
+                          "--md", str(tmp_path / "none.md"), "--proposal", "x"], runner=r) == 1
+    assert r.mutating() == []
 
 
 def test_unreadable_json_fails(env, tmp_path):
@@ -325,6 +478,17 @@ def test_expiry_issue_deduped_by_title(env):
     assert changed.find("gh", "issue", "create") == []
     edits = changed.find("gh", "issue", "edit")
     assert len(edits) == 1 and edits[0][3] == "3" and "--body-file" in edits[0]
+
+
+def test_expiry_body_does_not_change_day_to_day(env):
+    r = FakeRunner(labels=["price-expiry"])
+    assert env(0, r, expiry_warning=True, days_to_expiry=9) == 0
+    body = r.files[r.calls.index(r.find("gh", "issue", "create")[0])]
+    assert "2026-12-29" in body and "day(s) left" not in body
+    # The next day only days_to_expiry changes: the issue is not edited.
+    nxt = FakeRunner(issues=[{"number": 3, "title": "Price table expires on 2026-12-29", "body": body}])
+    assert env(0, nxt, expiry_warning=True, days_to_expiry=8) == 0
+    assert nxt.mutating() == []
 
 
 def test_expiry_closes_older_issues(env):
@@ -453,3 +617,34 @@ def test_workflow_has_no_untrusted_expression_in_run():
             in_run = False
         if in_run:
             assert "${{" not in line, line
+
+
+def test_workflow_base_branch_falls_back_to_ref_name():
+    # default_branch can be empty on `schedule` events; scheduled runs are on the
+    # default branch, so github.ref_name is right there.
+    text, wf = _load_workflow()
+    expr = "${{ github.event.repository.default_branch || github.ref_name }}"
+    assert f"ref: {expr}" in text
+    assert f"BASE_BRANCH: {expr}" in text
+    assert text.count("github.event.repository.default_branch") == 2  # no bare use left
+    if wf is not None:
+        steps = wf["jobs"]["drift"]["steps"]
+        checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout"))
+        assert checkout["with"]["ref"] == expr
+        pr_step = next(s for s in steps if "drift_pr.py" in s.get("run", ""))
+        assert pr_step["env"]["BASE_BRANCH"] == expr
+
+
+def test_workflow_checkout_does_not_persist_credentials():
+    text, wf = _load_workflow()
+    assert re.search(r"^\s+persist-credentials: false\s*$", text, re.M)
+    # Full history, so origin/<base>..origin/automation/price-drift lists only the
+    # branch's own commits (a shallow base would make every ancestor look new).
+    assert re.search(r"^\s+fetch-depth: 0\s*$", text, re.M)
+    if wf is not None:
+        steps = wf["jobs"]["drift"]["steps"]
+        checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout"))
+        assert checkout["with"]["persist-credentials"] is False
+        assert checkout["with"]["fetch-depth"] == 0
+    # The token reaches git only through gh's credential helper, never a URL or echo.
+    assert "x-access-token" not in text and not re.search(r"echo[^\n]*TOKEN", text)
