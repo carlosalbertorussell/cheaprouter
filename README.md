@@ -234,33 +234,6 @@ the prices (`ARBITRAGE_ALLOW_STALE_PRICES=1` downgrades the refusal to a warning
 `python scripts/check_prices.py` reports the age; `arbitrage_check_price_drift`
 compares fetchable prices against the table but never edits it.
 
-### Daily drift check (SC7)
-
-A scheduled job runs `scripts/drift_check.py` once a day, off the request path, and
-opens one PR when the OpenRouter feed disagrees with the table. To run the same
-check locally:
-
-```bash
-python scripts/drift_check.py --json-out drift.json --md-out drift.md \
-    --write-proposal prices.proposed.json
-```
-
-- **Significant** means `|feed - table| / table × 100 ≥ --threshold-pct` (default 5).
-  A table price of 0 with a non-zero feed price is always significant. Only
-  significant changes go into the proposal.
-- **Minor** drifts are below the threshold. They are listed in the report and never
-  proposed.
-- Manual providers (Groq, Qwen) and providers whose feed lookup failed are listed
-  for a manual check and never proposed.
-- The proposal is a full `prices.json`, formatted exactly like the original, so a
-  diff shows only the changed numbers. It never changes `verified_at` or
-  `verified_by`. The feed is a proxy, so check each number on the provider's page
-  (`pricing_urls`) and update both fields yourself before merging.
-- The report also gives `expires_on` (`verified_at` + `max_age_days`) and sets
-  `expiry_warning` when `--expiry-warn-days` (default 10) or fewer days remain.
-- Exit codes: 0 no significant drift, 10 significant drift, 2 invalid table or
-  the feed failed for every OpenRouter provider, 1 unexpected error.
-
 Prompt caching: `prices.json` models a cache-read rate for Anthropic, OpenAI, Gemini,
 Groq, Mistral, DeepSeek, Grok and qwen-max. Only the cache-read rate is modelled, not
 cache-write surcharges. qwen-flash and qwen-plus bill `cached_input_tokens` at the full
@@ -274,7 +247,7 @@ SC1e and Groq and Qwen in SC1d (see `prices.json` notes). The table expires on
 2026-12-29. The pricing pages each provider is checked against are listed in
 `prices.json` under `pricing_urls`.
 
-### Daily drift check
+### Daily drift check (SC7)
 
 `.github/workflows/price-drift.yml` runs once a day (05:37 UTC) and on demand,
 out-of-band; nothing on the request path changes. It runs
@@ -310,8 +283,32 @@ One-time setup: under Settings → Actions → General → Workflow permissions,
 `issues` write.
 
 To run it manually, go to Actions → "Daily price-drift check" → Run workflow, or
-run `gh workflow run price-drift.yml`. To run it locally without touching GitHub,
-use `python scripts/drift_check.py --md-out drift.md`.
+run `gh workflow run price-drift.yml`.
+
+#### Running the check locally
+
+This runs the same check without touching GitHub:
+
+```bash
+python scripts/drift_check.py --json-out drift.json --md-out drift.md \
+    --write-proposal prices.proposed.json
+```
+
+- **Significant** means `|feed - table| / table × 100 ≥ --threshold-pct` (default 5).
+  A table price of 0 with a non-zero feed price is always significant. Only
+  significant changes go into the proposal.
+- **Minor** drifts are below the threshold. They are listed in the report and never
+  proposed.
+- Manual providers (Groq, Qwen) and providers whose feed lookup failed are listed
+  for a manual check and never proposed.
+- The proposal is a full `prices.json`, formatted exactly like the original, so a
+  diff shows only the changed numbers. It never changes `verified_at` or
+  `verified_by`. The feed is a proxy, so check each number on the provider's page
+  (`pricing_urls`) and update both fields yourself before merging.
+- The report also gives `expires_on` (`verified_at` + `max_age_days`) and sets
+  `expiry_warning` when `--expiry-warn-days` (default 10) or fewer days remain.
+- Exit codes: 0 no significant drift, 10 significant drift, 2 invalid table or
+  the feed failed for every OpenRouter provider, 1 unexpected error.
 
 ## Project structure
 
