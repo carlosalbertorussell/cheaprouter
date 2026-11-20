@@ -247,6 +247,45 @@ SC1e and Groq and Qwen in SC1d (see `prices.json` notes). The table expires on
 2026-12-29. The pricing pages each provider is checked against are listed in
 `prices.json` under `pricing_urls`.
 
+### Daily drift check
+
+`.github/workflows/price-drift.yml` runs once a day (05:37 UTC) and on demand,
+out-of-band; nothing on the request path changes. It runs
+`scripts/drift_check.py` against the OpenRouter feed, then
+`scripts/drift_pr.py` does the GitHub side with `gh`:
+
+- **Significant drift** (exit 10): it opens one PR from `automation/price-drift`
+  with labels `price-drift` and `needs-human-verification`, or updates the open
+  one. If nothing changed since the last run (same fingerprint), it does nothing.
+  The branch belongs to the automation and is force-pushed on each update, so don't
+  build on it.
+- **Drift cleared** (exit 0): it comments once on the open drift PR and leaves it
+  open.
+- **Table invalid or feed down everywhere** (exit 2): the job fails and nothing
+  is opened.
+- **Near expiry:** it opens one `price-expiry` issue, "Price table expires on
+  <date>", and closes older ones.
+
+The proposed numbers come from the OpenRouter feed, so they are proxy
+provenance, not verified prices. **Before merging, a human must check every number
+on the provider's own pricing page (the PR has a checklist with the links) and
+update `verified_at` and `verified_by` in the PR.** The automation never changes
+those fields, and it never merges, auto-merges or approves.
+
+PRs opened with `GITHUB_TOKEN` don't trigger other workflows, so CI does not run
+on the drift PR by itself. To run CI, push a human commit to the branch (the
+`verified_at`/`verified_by` update is the natural one), or close and reopen the PR
+as a human.
+
+One-time setup: under Settings → Actions → General → Workflow permissions, enable
+**"Allow GitHub Actions to create and approve pull requests"**. Without it,
+`gh pr create` fails. The workflow requests only `contents`, `pull-requests` and
+`issues` write.
+
+To run it manually, go to Actions → "Daily price-drift check" → Run workflow, or
+run `gh workflow run price-drift.yml`. To run it locally without touching GitHub,
+use `python scripts/drift_check.py --md-out drift.md`.
+
 ## Project structure
 
 ```
@@ -255,7 +294,8 @@ cheaprouter/
 ├── pricing_server.py — second MCP server: verified prices with provenance (5 tools)
 ├── provenance.py    — trust tiers: verified / proxy / observed
 ├── price_history.py — append-only price trajectory (price_history.jsonl)
-├── scripts/         — check_prices.py (staleness), refresh_prices.py, gen_listing.py
+├── scripts/         — check_prices.py (staleness), refresh_prices.py, gen_listing.py,
+│                      drift_check.py + drift_pr.py (SC7 daily drift check)
 ├── providers.py     — Provider registry (built from prices.json), regions, BYOK key resolution
 ├── pricing_table.py — Price-table loader + staleness guard
 ├── refresh.py       — Price drift check + refresh proposal (S4b)
