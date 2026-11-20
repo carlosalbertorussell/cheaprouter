@@ -6,6 +6,10 @@ Fetches prices for providers with a programmatic source, compares them to
 prices.json, and prints a drift report. It never writes prices.json and never
 advances verified_at — it tells you what to verify by hand.
 
+This prints every difference, however small. For the threshold-gated check the
+daily job runs (significant vs minor drift, expiry warning, a proposal with only
+the significant changes, and the PR body), use scripts/drift_check.py (SC7).
+
 Usage:
     python scripts/refresh_prices.py            # human-readable report
     python scripts/refresh_prices.py --json     # machine-readable report

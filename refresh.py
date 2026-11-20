@@ -23,6 +23,7 @@ handover's hard rule intact: no invented or silently-guessed prices.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -87,15 +88,30 @@ def _index_openrouter(doc: dict) -> dict[str, dict]:
     return out
 
 
-def _or_price(pricing: dict, key: str) -> Optional[float]:
-    """Pull one OpenRouter price (per-token string) and convert to per-1M float."""
-    raw = pricing.get(key)
-    if raw is None:
+def _usable_price(value) -> Optional[float]:
+    """A real price as a float, or None. Accepts only real numbers or numeric
+    strings that are finite and > 0; booleans, NaN, infinities, zero and negatives
+    are rejected (OpenRouter uses "-1" for a variable price, "0" for free)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         return None
     try:
-        return float(raw) * _PER_TOKEN_TO_PER_1M
+        f = float(value)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(f) or f <= 0:
+        return None
+    return f
+
+
+def _or_price(pricing: dict, key: str) -> Optional[float]:
+    """Pull one OpenRouter price (per-token string) and convert to per-1M float.
+    None when the key is absent or its value is not a usable price (see
+    _usable_price): that is a failed lookup for the field, never drift."""
+    per_token = _usable_price(pricing.get(key))
+    if per_token is None:
+        return None
+    per_1m = per_token * _PER_TOKEN_TO_PER_1M
+    return per_1m if math.isfinite(per_1m) else None
 
 
 # Map our table field → OpenRouter pricing key
@@ -168,6 +184,7 @@ def check_drift(table: Optional[dict] = None) -> dict:
             ids = refresh.get("ids", {})   # {tier: "<openrouter model id>"}
             changes = []
             missing = []
+            unusable = []   # feed carries the key, but not a real price ("-1", "0", "inf", true, ...)
             for tier, model in prov["models"].items():
                 or_id = ids.get(tier)
                 if not or_id:
@@ -180,8 +197,12 @@ def check_drift(table: Optional[dict] = None) -> dict:
                                    "cached_input_price_per_1m"):
                     if field_name not in model:
                         continue  # e.g. no cache price in our table for this model
-                    fetched = _or_price(pricing, _OR_FIELD_KEYS[field_name])
+                    or_key = _OR_FIELD_KEYS[field_name]
+                    fetched = _or_price(pricing, or_key)
                     if fetched is None:
+                        if pricing.get(or_key) is not None:
+                            # A failed lookup for this field, like a missing model id.
+                            unusable.append(f"{tier}.{field_name}")
                         continue
                     current = float(model[field_name])
                     # OpenRouter values are already per-1M after conversion; compare
@@ -189,8 +210,13 @@ def check_drift(table: Optional[dict] = None) -> dict:
                     if abs(fetched - current) > max(1e-9, 1e-6 * current):
                         changes.append({"tier": tier, "field": field_name,
                                         "old": current, "new": round(fetched, 8)})
-            if missing:
-                detail = f"model id(s) not found in feed: {missing}"
+            if missing or unusable:
+                parts = []
+                if missing:
+                    parts.append(f"model id(s) not found in feed: {missing}")
+                if unusable:
+                    parts.append(f"unusable feed value(s) for: {unusable}")
+                detail = "; ".join(parts)
                 if changes:
                     results.append(ProviderDrift(pid, strategy, "drift",
                                    detail=f"{len(changes)} price(s) differ; " + detail, changes=changes))
@@ -363,3 +389,256 @@ def observed_validation(table: Optional[dict] = None, limit: int = 1000) -> dict
         "any_divergence": bool(diverges),
         "note": "Observed cost validates or challenges the verified table; it never becomes a published price.",
     }
+
+
+# ─── Freshness SLA: scheduled drift check (SC7) ───────────────────────────────
+#
+# Pure functions over a check_drift() report and a price table, so the daily job
+# (scripts/drift_check.py, run on a schedule by GitHub Actions) is testable
+# without the network. They classify each feed change as significant or minor,
+# compute the table's expiry, fingerprint the significant set, render the PR body,
+# and build a proposal that applies ONLY significant changes.
+#
+# Provenance holds throughout: nothing here touches verified_at/verified_by or
+# marks a price verified. Only openrouter-strategy (SC2) changes are classified;
+# manual providers, a drifting provider on any other strategy, and fetch-failed
+# providers are listed for a human and never proposed.
+
+import hashlib
+from datetime import date, datetime, timedelta
+
+DEFAULT_THRESHOLD_PCT = 5.0
+DEFAULT_EXPIRY_WARN_DAYS = 10
+FINGERPRINT_MARKER = "sc7-fingerprint"
+_PROPOSABLE_STRATEGY = "openrouter"
+
+
+def drift_pct(table_value: float, feed_value: float) -> Optional[float]:
+    """|feed - table| / table * 100. None when the table price is 0 and the feed
+    price is not (an infinite relative change)."""
+    table_value, feed_value = float(table_value), float(feed_value)
+    if table_value == 0:
+        return None if feed_value != 0 else 0.0
+    return abs(feed_value - table_value) / table_value * 100.0
+
+
+def is_significant(table_value: float, feed_value: float, threshold_pct: float) -> bool:
+    """Significant when the drift is >= threshold_pct (inclusive). A table price of
+    0 with a non-zero feed price is always significant."""
+    pct = drift_pct(table_value, feed_value)
+    if pct is None:
+        return True
+    # Round away float noise so exactly N% counts as N% (0.10 -> 0.105 is 5%).
+    return round(pct, 6) >= threshold_pct
+
+
+def classify_drift(report: dict, table: dict,
+                   threshold_pct: float = DEFAULT_THRESHOLD_PCT) -> dict:
+    """
+    Split a check_drift() report into significant and minor changes.
+
+    Returns {"significant", "minor", "fetch_failed", "manual"}. Each change is
+    {provider, tier, model_id, field, table, feed, pct}; pct is None when the
+    table price is 0. Only openrouter-strategy providers are classified; a
+    drifting provider on any other strategy is listed as manual.
+    """
+    significant, minor, fetch_failed, manual = [], [], [], []
+    for p in report.get("providers", []):
+        pid, status = p["provider_id"], p["status"]
+        if status == "fetch_failed":
+            fetch_failed.append(pid)
+            continue
+        if status == "manual" or (status == "drift" and p.get("strategy") != _PROPOSABLE_STRATEGY):
+            manual.append(pid)
+            continue
+        if status != "drift":
+            continue
+        models = table["providers"].get(pid, {}).get("models", {})
+        for ch in p.get("changes", []):
+            old, new = float(ch["old"]), float(ch["new"])
+            pct = drift_pct(old, new)
+            item = {
+                "provider": pid,
+                "tier": ch["tier"],
+                "model_id": models.get(ch["tier"], {}).get("model_id"),
+                "field": ch["field"],
+                "table": old,
+                "feed": new,
+                "pct": None if pct is None else round(pct, 2),
+            }
+            (significant if is_significant(old, new, threshold_pct) else minor).append(item)
+
+    def key(c):
+        return (c["provider"], c["tier"], c["field"])
+
+    return {
+        "significant": sorted(significant, key=key),
+        "minor": sorted(minor, key=key),
+        "fetch_failed": sorted(fetch_failed),
+        "manual": sorted(manual),
+    }
+
+
+def expiry_status(table: dict, today: date,
+                  expiry_warn_days: int = DEFAULT_EXPIRY_WARN_DAYS) -> dict:
+    """expires_on = verified_at + max_age_days. Warns when days_to_expiry <=
+    expiry_warn_days, which includes an already-expired table (negative days)."""
+    verified = datetime.strptime(table["verified_at"], "%Y-%m-%d").date()
+    max_age = int(table["max_age_days"])
+    expires_on = verified + timedelta(days=max_age)
+    days_left = (expires_on - today).days
+    return {
+        "verified_at": verified.isoformat(),
+        "max_age_days": max_age,
+        "expires_on": expires_on.isoformat(),
+        "days_to_expiry": days_left,
+        "expiry_warning": days_left <= expiry_warn_days,
+    }
+
+
+def drift_fingerprint(significant: list) -> str:
+    """sha256 hex of the sorted significant set, one 'provider|tier|field|table|feed'
+    line each. Independent of input order. It changes when the proposed number
+    changes, and also when the table value on the default branch changes while
+    the feed stays the same, so the PR is refreshed against the new base."""
+    lines = sorted(f"{c['provider']}|{c['tier']}|{c['field']}|"
+                   f"{float(c['table'])!r}|{float(c['feed'])!r}"
+                   for c in significant)
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+def no_feed_signal(report: dict) -> bool:
+    """True when no openrouter-strategy provider produced a usable result (every
+    one is fetch_failed, or there are none): the check says nothing about drift."""
+    ors = [p for p in report.get("providers", []) if p.get("strategy") == _PROPOSABLE_STRATEGY]
+    return all(p["status"] == "fetch_failed" for p in ors)
+
+
+def build_sla_report(report: dict, table: dict, today: date,
+                     threshold_pct: float = DEFAULT_THRESHOLD_PCT,
+                     expiry_warn_days: int = DEFAULT_EXPIRY_WARN_DAYS) -> dict:
+    """The SC7 JSON document (contract shape) from a check_drift() report."""
+    cls = classify_drift(report, table, threshold_pct)
+    out = {"checked_at": report.get("checked_at")}
+    out.update(expiry_status(table, today, expiry_warn_days))
+    out.update({
+        "threshold_pct": float(threshold_pct),
+        "significant": cls["significant"],
+        "minor": cls["minor"],
+        "fetch_failed": cls["fetch_failed"],
+        "manual": cls["manual"],
+        "fingerprint": drift_fingerprint(cls["significant"]),
+    })
+    return out
+
+
+def apply_significant(table: dict, significant: list) -> dict:
+    """A deep copy of the table with ONLY the given (significant) changes applied.
+    verified_at / verified_by are never touched and no _candidate key is added.
+
+    Second line of defence behind _or_price: raises ValueError for any proposed
+    value that is not a real, finite, positive number, so a proposal can never
+    carry NaN/Infinity (invalid strict JSON), a zero, a negative or a boolean."""
+    import copy
+    for c in significant:
+        v = c["feed"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0:
+            raise ValueError(f"refusing to propose {v!r} for {c['provider']} {c['tier']} "
+                             f"{c['field']}: not a finite positive price")
+    t = copy.deepcopy(table)
+    t.pop("_candidate", None)
+    for c in significant:
+        t["providers"][c["provider"]]["models"][c["tier"]][c["field"]] = c["feed"]
+    return t
+
+
+def dump_like(table: dict, original_text: str) -> str:
+    """Serialise a table formatted exactly like prices.json (indent 2, key order
+    kept, trailing newline as the original has it), so a diff shows only the
+    changed numbers. Uses whichever ensure_ascii setting reproduces the original."""
+    trailing = "\n" if original_text.endswith("\n") else ""
+    original = json.loads(original_text)
+    ensure_ascii = False
+    if json.dumps(original, indent=2, ensure_ascii=True) + trailing == original_text:
+        ensure_ascii = True
+    return json.dumps(table, indent=2, ensure_ascii=ensure_ascii) + trailing
+
+
+def _fmt_price(v) -> str:
+    return f"{float(v):g}"
+
+
+def _fmt_pct(c: dict) -> str:
+    if c["pct"] is None:
+        return "new (table 0)"
+    sign = "+" if c["feed"] > c["table"] else "-"
+    return f"{sign}{c['pct']:g}%"
+
+
+def _change_rows(changes: list) -> list:
+    if not changes:
+        return ["None."]
+    rows = ["| Provider | Tier | Model | Field | Table → Feed | Change |",
+            "|---|---|---|---|---|---|"]
+    for c in changes:
+        rows.append(f"| {c['provider']} | {c['tier']} | `{c['model_id']}` | `{c['field']}` | "
+                    f"{_fmt_price(c['table'])} → {_fmt_price(c['feed'])} | {_fmt_pct(c)} |")
+    return rows
+
+
+def render_drift_markdown(sla: dict, pricing_urls: dict) -> str:
+    """The PR body (SC7 contract): significant changes, a per-change verification
+    checklist with each provider's pricing URL, the proxy-provenance warning,
+    minor drifts, fetch-failed and manual providers, expiry status, and the
+    hidden fingerprint marker."""
+    sig = sla["significant"]
+    lines = [
+        "## Price drift check (SC7)",
+        "",
+        f"Checked at `{sla['checked_at']}` against the OpenRouter feed. Threshold: "
+        f"**{sla['threshold_pct']:g}%**. A change at or above it is significant and proposed "
+        f"here; smaller drifts are listed as minor and never proposed.",
+        "",
+        "**These numbers come from the OpenRouter feed (proxy provenance), not from the "
+        "providers. Check each one on the provider's own pricing page before merging, and "
+        "update `verified_at` and `verified_by` in prices.json yourself. This PR leaves both "
+        "unchanged and does not make any price verified.**",
+        "",
+        f"### Significant changes ({len(sig)})",
+        "",
+        *_change_rows(sig),
+        "",
+        "### Verification checklist",
+        "",
+    ]
+    for c in sig:
+        url = pricing_urls.get(c["provider"]) or "(no pricing URL in prices.json)"
+        lines.append(f"- [ ] {c['provider']} {c['tier']} `{c['model_id']}` `{c['field']}`: "
+                     f"{_fmt_price(c['table'])} → {_fmt_price(c['feed'])}, check on {url}")
+    lines.append("- [ ] `verified_at` and `verified_by` updated by a human after checking")
+
+    if sla["expiry_warning"]:
+        when = (f"expires in {sla['days_to_expiry']} day(s)" if sla["days_to_expiry"] >= 0
+                else f"expired {-sla['days_to_expiry']} day(s) ago")
+        expiry = f"**Warning: {when}.**"
+    else:
+        expiry = f"OK, {sla['days_to_expiry']} day(s) left."
+    lines += [
+        "",
+        f"### Minor drifts ({len(sla['minor'])}, below threshold, not proposed)",
+        "",
+        *_change_rows(sla["minor"]),
+        "",
+        "### Not checked against the feed",
+        "",
+        f"- Fetch failed (no signal, never treated as drift): {', '.join(sla['fetch_failed']) or 'none'}",
+        f"- Manual (needs a manual check on the provider's page): {', '.join(sla['manual']) or 'none'}",
+        "",
+        "### Expiry",
+        "",
+        f"`verified_at` {sla['verified_at']} + {sla['max_age_days']} days: expires on "
+        f"{sla['expires_on']}. {expiry}",
+        "",
+        f"<!-- {FINGERPRINT_MARKER}: {sla['fingerprint']} -->",
+    ]
+    return "\n".join(lines) + "\n"

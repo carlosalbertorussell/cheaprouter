@@ -247,6 +247,87 @@ SC1e and Groq and Qwen in SC1d (see `prices.json` notes). The table expires on
 2026-12-29. The pricing pages each provider is checked against are listed in
 `prices.json` under `pricing_urls`.
 
+### Daily drift check (SC7)
+
+`.github/workflows/price-drift.yml` runs once a day (05:37 UTC) and on demand,
+out-of-band; nothing on the request path changes. It runs
+`scripts/drift_check.py` against the OpenRouter feed, then
+`scripts/drift_pr.py` does the GitHub side with `gh`:
+
+- **Significant drift** (exit 10): it opens one PR from `automation/price-drift`
+  with labels `price-drift` and `needs-human-verification`, or updates the open
+  one. If any drift PR, open, closed or merged, already carries the same
+  fingerprint, it does nothing, so closing the PR rejects that drift for good; only
+  a different drift (a new feed number, or a table value changed on the default
+  branch) opens a new PR.
+- **Your commits on the drift branch are safe.** While the branch holds only the
+  automation's commit, a newer drift resets and force-pushes it. Once anyone else
+  has pushed a commit to it (your `verified_at`/`verified_by` update, or corrected
+  numbers), the automation never resets or pushes it again: it posts one comment
+  listing the newer drift and asks you to reconcile it by hand (or close the PR so
+  the newer drift is proposed afresh).
+- **Default branch moved during the run:** it skips that run (the job still
+  succeeds) rather than proposing against an old base; the next run uses the new
+  one.
+- **Drift cleared** (exit 0): it comments once on the open drift PR and leaves it
+  open.
+- **Table invalid or feed down everywhere** (exit 2): the job fails and no PR is
+  opened. The expiry issue below is still handled when the table is valid, so a
+  long feed outage does not hide the expiry.
+- **Near expiry:** it opens one `price-expiry` issue, "Price table expires on
+  <date>", and closes older ones. The body gives the expiry date, not a daily
+  countdown, so it changes only when the dates do.
+
+The proposed numbers come from the OpenRouter feed, so they are proxy
+provenance, not verified prices. **Before merging, a human must check every number
+on the provider's own pricing page (the PR has a checklist with the links) and
+update `verified_at` and `verified_by` in the PR.** The automation never changes
+those fields, and it never merges, auto-merges or approves.
+
+PRs opened with `GITHUB_TOKEN` don't trigger other workflows, so CI does not run
+on the drift PR by itself. To run CI, push a human commit to the branch (the
+`verified_at`/`verified_by` update is the natural one), or close and reopen the PR
+as a human.
+
+One-time setup: under Settings → Actions → General → Workflow permissions, enable
+**"Allow GitHub Actions to create and approve pull requests"**. Without it,
+`gh pr create` fails. The workflow requests only `contents`, `pull-requests` and
+`issues` write. The checkout does not persist credentials; git reaches GitHub
+through `gh auth setup-git`, which reads the job token from `GH_TOKEN` and never
+prints it.
+
+To run it manually, go to Actions → "Daily price-drift check" → Run workflow, or
+run `gh workflow run price-drift.yml`.
+
+#### Running the check locally
+
+This runs the same check without touching GitHub:
+
+```bash
+python scripts/drift_check.py --json-out drift.json --md-out drift.md \
+    --write-proposal prices.proposed.json
+```
+
+- **Significant** means `|feed - table| / table × 100 ≥ --threshold-pct` (default 5).
+  A table price of 0 with a non-zero feed price is always significant. Only
+  significant changes go into the proposal.
+- Only finite prices above zero count. A feed value such as `"-1"` (OpenRouter's
+  variable-price marker), `"0"`, `"inf"`, `"nan"` or `true` is a failed lookup for
+  that field, never drift: the provider's other fields are still compared, and a
+  provider with nothing usable is listed as fetch-failed.
+- **Minor** drifts are below the threshold. They are listed in the report and never
+  proposed.
+- Manual providers (Groq, Qwen) and providers whose feed lookup failed are listed
+  for a manual check and never proposed.
+- The proposal is a full `prices.json`, formatted exactly like the original, so a
+  diff shows only the changed numbers. It never changes `verified_at` or
+  `verified_by`. The feed is a proxy, so check each number on the provider's page
+  (`pricing_urls`) and update both fields yourself before merging.
+- The report also gives `expires_on` (`verified_at` + `max_age_days`) and sets
+  `expiry_warning` when `--expiry-warn-days` (default 10) or fewer days remain.
+- Exit codes: 0 no significant drift, 10 significant drift, 2 invalid table or
+  the feed failed for every OpenRouter provider, 1 unexpected error.
+
 ## Project structure
 
 ```
@@ -255,7 +336,8 @@ cheaprouter/
 ├── pricing_server.py — second MCP server: verified prices with provenance (5 tools)
 ├── provenance.py    — trust tiers: verified / proxy / observed
 ├── price_history.py — append-only price trajectory (price_history.jsonl)
-├── scripts/         — check_prices.py (staleness), refresh_prices.py, gen_listing.py
+├── scripts/         — check_prices.py (staleness), refresh_prices.py, gen_listing.py,
+│                      drift_check.py + drift_pr.py (SC7 daily drift check)
 ├── providers.py     — Provider registry (built from prices.json), regions, BYOK key resolution
 ├── pricing_table.py — Price-table loader + staleness guard
 ├── refresh.py       — Price drift check + refresh proposal (S4b)

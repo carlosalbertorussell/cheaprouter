@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""
+GitHub side of the SC7 daily drift check (.github/workflows/price-drift.yml).
+
+Runs after scripts/drift_check.py and acts on its exit code, JSON and Markdown
+through the GitHub CLI (`gh`) and git. It never merges, never enables
+auto-merge, never approves, and never touches verified_at / verified_by.
+
+    python scripts/drift_pr.py --exit-code N --json drift.json --md drift.md \
+        --proposal prices.proposed.json [--base main] [--repo-dir .]
+
+Behaviour by drift_check exit code:
+  10  significant drift: look up every PR from `automation/price-drift`, in any
+      state. If any of them (open, closed or merged) carries the same
+      `<!-- sc7-fingerprint: ... -->`, do nothing: a closed PR is a human's
+      rejection and is not re-proposed. Otherwise:
+        - if the default branch moved since this job checked it out, skip the
+          run (exit 0); the next run proposes against the new base;
+        - if the open drift PR's branch has a commit not authored by the
+          automation since it branched from base (a human's verified_at commit
+          or corrected numbers), leave the branch alone and post one comment
+          (deduped per fingerprint) listing the newer drift for the human to
+          reconcile;
+        - else reset the branch from the default branch, commit the proposal as
+          prices.json, force-push the branch (automation-owned; leased on the
+          tip just inspected, and nothing else is ever force-pushed), then open
+          a PR or edit the open one's body.
+   0  no significant drift: if a drift PR is open, comment once per PR that the
+      drift has cleared. The PR stays open for a human.
+   2  invalid table or the feed failed everywhere: still open/update the expiry
+      issue when the JSON has expiry fields (a feed outage must not hide the
+      expiry), open no PR, and exit 1 so the job fails.
+ other (1, unexpected): exit 1, nothing is opened.
+
+When the JSON says `expiry_warning`, one issue labelled `price-expiry` titled
+"Price table expires on <expires_on>" is opened, or its body updated on a real
+change; open price-expiry issues for other dates are closed with a comment.
+
+Untrusted text (the Markdown body) is always passed with --body-file, and every
+command is an argv list (no shell). Tokens are read by gh from GH_TOKEN; this
+script never reads or prints them. The workflow checks out with
+persist-credentials: false, so git reaches GitHub through `gh auth setup-git`
+(gh's credential helper, which reads GH_TOKEN at call time; nothing is written
+into a remote URL).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Optional, Sequence
+
+BRANCH = "automation/price-drift"
+PR_LABELS = {
+    "price-drift": ("d93f0b", "Proposed price change from the daily drift check"),
+    "needs-human-verification": ("fbca04", "A human must verify every number on the provider's page"),
+}
+EXPIRY_LABEL = ("price-expiry", "b60205", "The price table is close to its max_age_days expiry")
+BOT_NAME = "github-actions[bot]"
+BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
+FINGERPRINT_RE = re.compile(r"<!--\s*sc7-fingerprint:\s*([0-9a-fA-F]+)\s*-->")
+CLEARED_MARKER = "<!-- sc7-drift-cleared -->"
+NEWER_DRIFT_MARKER = "<!-- sc7-newer-drift: {} -->"
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+EXPIRY_TITLE = "Price table expires on {}"
+
+
+@dataclass
+class Result:
+    returncode: int
+    stdout: str = ""
+    stderr: str = ""
+
+
+Runner = Callable[[Sequence[str], Optional[str]], Result]
+
+
+def subprocess_runner(cmd: Sequence[str], cwd: Optional[str] = None) -> Result:
+    p = subprocess.run(list(cmd), cwd=cwd, capture_output=True, text=True)
+    return Result(p.returncode, p.stdout, p.stderr)
+
+
+class HelperError(Exception):
+    pass
+
+
+class BaseMoved(Exception):
+    """The default branch moved after this job checked it out: skip this run."""
+
+
+class Ctx:
+    def __init__(self, runner: Runner, repo_dir: str, tmpdir: str):
+        self.runner = runner
+        self.repo_dir = repo_dir
+        self.tmpdir = tmpdir
+        self._n = 0
+
+    def run(self, cmd: Sequence[str], check: bool = True) -> Result:
+        res = self.runner(list(cmd), self.repo_dir)
+        if check and res.returncode != 0:
+            # Only the command name and stderr: gh/git never echo GH_TOKEN.
+            raise HelperError(f"command failed ({res.returncode}): {' '.join(cmd[:3])} ...\n{res.stderr.strip()}")
+        return res
+
+    def run_json(self, cmd: Sequence[str]):
+        out = self.run(cmd).stdout.strip()
+        return json.loads(out) if out else []
+
+    def body_file(self, text: str) -> str:
+        self._n += 1
+        path = Path(self.tmpdir) / f"body-{self._n}.md"
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def fingerprint_in(body: str | None) -> str | None:
+    m = FINGERPRINT_RE.search(body or "")
+    return m.group(1).lower() if m else None
+
+
+def drift_prs(ctx: Ctx) -> list[dict]:
+    """Every PR from the automation branch, in any state (open, closed, merged)."""
+    return ctx.run_json(["gh", "pr", "list", "--head", BRANCH, "--state", "all",
+                         "--json", "number,body,url,state", "--limit", "100"]) or []
+
+
+def open_pr_in(prs: list[dict]) -> dict | None:
+    return next((p for p in prs if str(p.get("state", "")).upper() == "OPEN"), None)
+
+
+def pr_comments(ctx: Ctx, number) -> list[dict]:
+    view = ctx.run_json(["gh", "pr", "view", str(number), "--json", "comments"])
+    return (view or {}).get("comments") or []
+
+
+def rev_parse(ctx: Ctx, ref: str) -> str:
+    return ctx.run(["git", "rev-parse", ref]).stdout.strip()
+
+
+def non_bot_authors(ctx: Ctx, base: str) -> list[str]:
+    """Author emails of the branch's commits since it branched from base that are
+    not the automation's (needs full history: the workflow uses fetch-depth 0)."""
+    out = ctx.run(["git", "log", "--format=%ae", f"origin/{base}..origin/{BRANCH}"]).stdout
+    return [a for a in (l.strip() for l in out.splitlines()) if a and a.lower() != BOT_EMAIL.lower()]
+
+
+def ensure_labels(ctx: Ctx, labels: dict[str, tuple[str, str]]) -> None:
+    existing = {l["name"] for l in ctx.run_json(["gh", "label", "list", "--json", "name", "--limit", "500"])}
+    for name, (color, desc) in labels.items():
+        if name not in existing:
+            ctx.run(["gh", "label", "create", name, "--color", color, "--description", desc])
+
+
+def default_branch(ctx: Ctx) -> str:
+    out = ctx.run(["gh", "repo", "view", "--json", "defaultBranchRef",
+                   "--jq", ".defaultBranchRef.name"]).stdout.strip()
+    if not out:
+        raise HelperError("could not determine the default branch")
+    return out
+
+
+def check_proposal(proposal: dict, current: dict) -> None:
+    """Defence in depth for the provenance rules (the engine already does this)."""
+    for key in ("verified_at", "verified_by"):
+        if proposal.get(key) != current.get(key):
+            raise HelperError(f"proposal changes {key}; automation must never touch it")
+    if "_candidate" in proposal:
+        raise HelperError("proposal carries a _candidate key; refusing to commit it")
+
+
+def pr_body(md: str, fingerprint: str) -> str:
+    if fingerprint_in(md) != fingerprint:
+        md = md.rstrip("\n") + f"\n\n<!-- sc7-fingerprint: {fingerprint} -->\n"
+    return md
+
+
+# ── exit 10 ──────────────────────────────────────────────────────────────────
+
+def _num(v) -> str:
+    return f"{v:g}" if isinstance(v, (int, float)) and not isinstance(v, bool) else str(v)
+
+
+def _newer_drift_comment(report: dict, fingerprint: str) -> str:
+    rows = [f"- {c.get('provider')} {c.get('tier')} `{c.get('model_id')}` `{c.get('field')}`: "
+            f"{_num(c.get('table'))} → {_num(c.get('feed'))}"
+            for c in report.get("significant") or []]
+    return (
+        f"{NEWER_DRIFT_MARKER.format(fingerprint)}\n"
+        f"The daily drift check at {report.get('checked_at', 'the latest run')} found a newer "
+        "drift than the one this PR proposes. This branch has commits from a human, so the "
+        "automation has **not** reset or force-pushed it.\n\n"
+        "Significant changes in the newer drift (OpenRouter feed, proxy provenance, not verified):\n\n"
+        + "\n".join(rows or ["- (none listed)"]) + "\n\n"
+        "Please reconcile these with the numbers on this branch by hand (check each on the "
+        "provider's own pricing page), or close this PR to let the automation propose afresh.\n"
+    )
+
+
+def handle_drift(ctx: Ctx, report: dict, md: str, proposal_path: Path, base: str | None) -> None:
+    fingerprint = str(report.get("fingerprint") or "").lower()
+    if not re.fullmatch(r"[0-9a-f]+", fingerprint):
+        raise HelperError("drift JSON has no valid fingerprint")
+    if not proposal_path.is_file():
+        raise HelperError(f"exit 10 but no proposal at {proposal_path}")
+
+    prs = drift_prs(ctx)
+    for p in prs:
+        if fingerprint_in(p.get("body")) == fingerprint:
+            state = str(p.get("state", "")).lower() or "open"
+            print(f"Drift PR #{p['number']} ({state}) already carries fingerprint "
+                  f"{fingerprint[:12]}; nothing to do.")
+            return
+    pr = open_pr_in(prs)
+
+    proposal_text = proposal_path.read_text(encoding="utf-8")
+    proposal = json.loads(proposal_text)
+    base = base or default_branch(ctx)
+    n = len(report.get("significant") or [])
+
+    # git authenticates through gh's credential helper (checkout does not persist
+    # credentials); the token is read from GH_TOKEN by gh and never printed.
+    ctx.run(["gh", "auth", "setup-git"])
+
+    # The proposal was computed from the commit checked out at job start. If the
+    # base moved since, copying it over the new base would revert those edits.
+    started_at = rev_parse(ctx, "HEAD")
+    ctx.run(["git", "fetch", "--no-tags", "origin", base])
+    base_now = rev_parse(ctx, f"origin/{base}")
+    if base_now != started_at:
+        raise BaseMoved(f"{base} moved from {started_at[:12]} to {base_now[:12]} during this run; "
+                        "skipping. The next run will check against the new base.")
+
+    lease = None
+    if pr:
+        ctx.run(["git", "fetch", "--no-tags", "origin",
+                 f"+refs/heads/{BRANCH}:refs/remotes/origin/{BRANCH}"])
+        lease = rev_parse(ctx, f"refs/remotes/origin/{BRANCH}")
+        humans = non_bot_authors(ctx, base)
+        if humans:
+            marker = NEWER_DRIFT_MARKER.format(fingerprint)
+            if any(marker in (c.get("body") or "") for c in pr_comments(ctx, pr["number"])):
+                print(f"Drift PR #{pr['number']} has human commits and was already told about "
+                      f"fingerprint {fingerprint[:12]}; leaving it alone.")
+                return
+            ctx.run(["gh", "pr", "comment", str(pr["number"]), "--body-file",
+                     ctx.body_file(_newer_drift_comment(report, fingerprint))])
+            print(f"Drift PR #{pr['number']} has human commits; not resetting it. "
+                  "Commented about the newer drift.")
+            return
+
+    # Reset the automation-owned branch from the default branch.
+    ctx.run(["git", "checkout", "-B", BRANCH, f"origin/{base}"])
+    prices = Path(ctx.repo_dir) / "prices.json"
+    check_proposal(proposal, json.loads(prices.read_text(encoding="utf-8")))
+    shutil.copyfile(proposal_path, prices)
+    if ctx.run(["git", "diff", "--quiet", "--", "prices.json"], check=False).returncode == 0:
+        print(f"Proposal is identical to {base}'s prices.json; nothing to propose.")
+        return
+    ctx.run(["git", "config", "user.name", BOT_NAME])
+    ctx.run(["git", "config", "user.email", BOT_EMAIL])
+    ctx.run(["git", "add", "prices.json"])
+    msg = (
+        f"chore(prices): propose {n} price change(s) from the daily drift check\n\n"
+        "Numbers come from the OpenRouter feed (proxy provenance) and are NOT verified.\n"
+        "verified_at and verified_by are unchanged; a human must verify each number\n"
+        "on the provider's pricing page and update them before merging.\n\n"
+        f"sc7-fingerprint: {fingerprint}\n"
+    )
+    ctx.run(["git", "commit", "-F", ctx.body_file(msg)])
+    # Force-push ONLY the automation-owned branch. With an open PR, lease on the
+    # tip inspected above, so a human push in the meantime makes this fail
+    # instead of being overwritten.
+    force = f"--force-with-lease=refs/heads/{BRANCH}:{lease}" if lease else "--force"
+    ctx.run(["git", "push", force, "origin", f"HEAD:refs/heads/{BRANCH}"])
+
+    ensure_labels(ctx, PR_LABELS)
+    title = f"Price drift: {n} significant change(s) need human verification"
+    body = ctx.body_file(pr_body(md, fingerprint))
+    if pr:
+        ctx.run(["gh", "pr", "edit", str(pr["number"]), "--title", title, "--body-file", body,
+                 *[a for l in PR_LABELS for a in ("--add-label", l)]])
+        print(f"Updated drift PR #{pr['number']} (fingerprint {fingerprint[:12]}).")
+    else:
+        ctx.run(["gh", "pr", "create", "--base", base, "--head", BRANCH, "--title", title,
+                 "--body-file", body, *[a for l in PR_LABELS for a in ("--label", l)]])
+        print(f"Opened drift PR (fingerprint {fingerprint[:12]}).")
+
+
+# ── exit 0 ───────────────────────────────────────────────────────────────────
+
+def handle_clear(ctx: Ctx, report: dict) -> None:
+    pr = open_pr_in(drift_prs(ctx))
+    if not pr:
+        print("No significant drift and no open drift PR.")
+        return
+    if any(CLEARED_MARKER in (c.get("body") or "") for c in pr_comments(ctx, pr["number"])):
+        print(f"Drift PR #{pr['number']} already has a 'drift cleared' comment.")
+        return
+    text = (
+        f"{CLEARED_MARKER}\n"
+        f"The daily drift check at {report.get('checked_at', 'the latest run')} found no "
+        "significant drift: the feed now matches prices.json within the threshold. "
+        "This PR is left open for a human to close or merge."
+    )
+    ctx.run(["gh", "pr", "comment", str(pr["number"]), "--body-file", ctx.body_file(text)])
+    print(f"Commented on drift PR #{pr['number']} that drift has cleared.")
+
+
+# ── expiry ───────────────────────────────────────────────────────────────────
+
+def handle_expiry(ctx: Ctx, report: dict) -> None:
+    expires_on = str(report.get("expires_on") or "")
+    if not DATE_RE.match(expires_on):
+        print("No valid expires_on in the drift JSON; skipping expiry handling.")
+        return
+    title = EXPIRY_TITLE.format(expires_on)
+    issues = ctx.run_json(["gh", "issue", "list", "--label", EXPIRY_LABEL[0], "--state", "open",
+                           "--json", "number,title,body", "--limit", "100"])
+    for issue in issues:
+        if issue.get("title") != title:
+            ctx.run(["gh", "issue", "close", str(issue["number"]), "--comment",
+                     f"Superseded: the price table now expires on {expires_on}."])
+            print(f"Closed stale price-expiry issue #{issue['number']}.")
+    if not report.get("expiry_warning"):
+        return
+    # No day count here: the body must not change every day, only when the dates do.
+    body = (
+        f"The price table (verified_at {report.get('verified_at')}, max_age_days "
+        f"{report.get('max_age_days')}) expires on **{expires_on}**. After that date, "
+        "routing refuses with `price_table_stale`.\n\nRe-verify every price on the provider "
+        "pages listed in prices.json `pricing_urls`, then update `verified_at` and "
+        "`verified_by`.\n"
+    )
+    current = [i for i in issues if i.get("title") == title]
+    if current:
+        if (current[0].get("body") or "").strip() != body.strip():
+            ctx.run(["gh", "issue", "edit", str(current[0]["number"]), "--body-file", ctx.body_file(body)])
+            print(f"Updated price-expiry issue #{current[0]['number']}.")
+        return
+    ensure_labels(ctx, {EXPIRY_LABEL[0]: EXPIRY_LABEL[1:]})
+    ctx.run(["gh", "issue", "create", "--title", title, "--body-file", ctx.body_file(body),
+             "--label", EXPIRY_LABEL[0]])
+    print(f"Opened issue: {title}.")
+
+
+# ── entry point ──────────────────────────────────────────────────────────────
+
+def main(argv: Sequence[str] | None = None, runner: Runner | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    ap.add_argument("--exit-code", type=int, required=True, help="drift_check.py's exit code")
+    ap.add_argument("--json", required=True, help="drift_check.py --json-out file")
+    ap.add_argument("--md", required=True, help="drift_check.py --md-out file")
+    ap.add_argument("--proposal", required=True, help="drift_check.py --write-proposal file")
+    ap.add_argument("--base", default=None, help="default branch (queried with gh if omitted)")
+    ap.add_argument("--repo-dir", default=".", help="repository checkout (default: .)")
+    args = ap.parse_args(argv)
+
+    code = args.exit_code
+    if code == 2:
+        print("::error::drift check exit 2: the price table is invalid or the feed failed for every "
+              "provider. No drift PR was opened.")
+        # The CLI still writes the JSON (with expiry fields) when the table is valid
+        # but the feed failed: keep the expiry warning working through an outage.
+        try:
+            report = json.loads(Path(args.json).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            report = None
+        if isinstance(report, dict) and report.get("expires_on"):
+            with tempfile.TemporaryDirectory() as tmp:
+                try:
+                    handle_expiry(Ctx(runner or subprocess_runner, args.repo_dir, tmp), report)
+                except HelperError as exc:
+                    print(f"::error::{exc}")
+        return 1
+    if code not in (0, 10):
+        print(f"::error::drift check failed unexpectedly (exit {code}). No PR or issue was opened.")
+        return 1
+
+    try:
+        report = json.loads(Path(args.json).read_text(encoding="utf-8"))
+        md = Path(args.md).read_text(encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        print(f"::error::cannot read drift check output: {exc}")
+        return 1
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ctx = Ctx(runner or subprocess_runner, args.repo_dir, tmp)
+        try:
+            if code == 10:
+                handle_drift(ctx, report, md, Path(args.proposal), args.base)
+            else:
+                handle_clear(ctx, report)
+            handle_expiry(ctx, report)
+        except BaseMoved as exc:
+            print(f"::notice::{exc}")
+            return 0
+        except HelperError as exc:
+            print(f"::error::{exc}")
+            return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
