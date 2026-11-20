@@ -23,6 +23,7 @@ handover's hard rule intact: no invented or silently-guessed prices.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -87,15 +88,30 @@ def _index_openrouter(doc: dict) -> dict[str, dict]:
     return out
 
 
-def _or_price(pricing: dict, key: str) -> Optional[float]:
-    """Pull one OpenRouter price (per-token string) and convert to per-1M float."""
-    raw = pricing.get(key)
-    if raw is None:
+def _usable_price(value) -> Optional[float]:
+    """A real price as a float, or None. Accepts only real numbers or numeric
+    strings that are finite and > 0; booleans, NaN, infinities, zero and negatives
+    are rejected (OpenRouter uses "-1" for a variable price, "0" for free)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         return None
     try:
-        return float(raw) * _PER_TOKEN_TO_PER_1M
+        f = float(value)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(f) or f <= 0:
+        return None
+    return f
+
+
+def _or_price(pricing: dict, key: str) -> Optional[float]:
+    """Pull one OpenRouter price (per-token string) and convert to per-1M float.
+    None when the key is absent or its value is not a usable price (see
+    _usable_price): that is a failed lookup for the field, never drift."""
+    per_token = _usable_price(pricing.get(key))
+    if per_token is None:
+        return None
+    per_1m = per_token * _PER_TOKEN_TO_PER_1M
+    return per_1m if math.isfinite(per_1m) else None
 
 
 # Map our table field → OpenRouter pricing key
@@ -168,6 +184,7 @@ def check_drift(table: Optional[dict] = None) -> dict:
             ids = refresh.get("ids", {})   # {tier: "<openrouter model id>"}
             changes = []
             missing = []
+            unusable = []   # feed carries the key, but not a real price ("-1", "0", "inf", true, ...)
             for tier, model in prov["models"].items():
                 or_id = ids.get(tier)
                 if not or_id:
@@ -180,8 +197,12 @@ def check_drift(table: Optional[dict] = None) -> dict:
                                    "cached_input_price_per_1m"):
                     if field_name not in model:
                         continue  # e.g. no cache price in our table for this model
-                    fetched = _or_price(pricing, _OR_FIELD_KEYS[field_name])
+                    or_key = _OR_FIELD_KEYS[field_name]
+                    fetched = _or_price(pricing, or_key)
                     if fetched is None:
+                        if pricing.get(or_key) is not None:
+                            # A failed lookup for this field, like a missing model id.
+                            unusable.append(f"{tier}.{field_name}")
                         continue
                     current = float(model[field_name])
                     # OpenRouter values are already per-1M after conversion; compare
@@ -189,8 +210,13 @@ def check_drift(table: Optional[dict] = None) -> dict:
                     if abs(fetched - current) > max(1e-9, 1e-6 * current):
                         changes.append({"tier": tier, "field": field_name,
                                         "old": current, "new": round(fetched, 8)})
-            if missing:
-                detail = f"model id(s) not found in feed: {missing}"
+            if missing or unusable:
+                parts = []
+                if missing:
+                    parts.append(f"model id(s) not found in feed: {missing}")
+                if unusable:
+                    parts.append(f"unusable feed value(s) for: {unusable}")
+                detail = "; ".join(parts)
                 if changes:
                     results.append(ProviderDrift(pid, strategy, "drift",
                                    detail=f"{len(changes)} price(s) differ; " + detail, changes=changes))
@@ -471,9 +497,12 @@ def expiry_status(table: dict, today: date,
 
 
 def drift_fingerprint(significant: list) -> str:
-    """sha256 hex of the sorted significant set, one 'provider|tier|field|feed'
-    line each. Independent of input order; changes only when a proposal does."""
-    lines = sorted(f"{c['provider']}|{c['tier']}|{c['field']}|{float(c['feed'])!r}"
+    """sha256 hex of the sorted significant set, one 'provider|tier|field|table|feed'
+    line each. Independent of input order. It changes when the proposed number
+    changes, and also when the table value on the default branch changes while
+    the feed stays the same, so the PR is refreshed against the new base."""
+    lines = sorted(f"{c['provider']}|{c['tier']}|{c['field']}|"
+                   f"{float(c['table'])!r}|{float(c['feed'])!r}"
                    for c in significant)
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
@@ -505,8 +534,17 @@ def build_sla_report(report: dict, table: dict, today: date,
 
 def apply_significant(table: dict, significant: list) -> dict:
     """A deep copy of the table with ONLY the given (significant) changes applied.
-    verified_at / verified_by are never touched and no _candidate key is added."""
+    verified_at / verified_by are never touched and no _candidate key is added.
+
+    Second line of defence behind _or_price: raises ValueError for any proposed
+    value that is not a real, finite, positive number, so a proposal can never
+    carry NaN/Infinity (invalid strict JSON), a zero, a negative or a boolean."""
     import copy
+    for c in significant:
+        v = c["feed"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0:
+            raise ValueError(f"refusing to propose {v!r} for {c['provider']} {c['tier']} "
+                             f"{c['field']}: not a finite positive price")
     t = copy.deepcopy(table)
     t.pop("_candidate", None)
     for c in significant:

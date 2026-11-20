@@ -157,18 +157,27 @@ def test_no_feed_signal():
 # ─── fingerprint ──────────────────────────────────────────────────────────────
 
 def test_fingerprint_stable_and_order_independent():
-    a = {"provider": "openai", "tier": "tier_fast", "field": "input_price_per_1m", "feed": 0.12}
-    b = {"provider": "grok", "tier": "tier_powerful", "field": "output_price_per_1m", "feed": 30.0}
+    a = {"provider": "openai", "tier": "tier_fast", "field": "input_price_per_1m",
+         "table": 0.1, "feed": 0.12}
+    b = {"provider": "grok", "tier": "tier_powerful", "field": "output_price_per_1m",
+         "table": 25.0, "feed": 30.0}
     fp = refresh.drift_fingerprint([a, b])
     assert fp == refresh.drift_fingerprint([b, a])
     assert fp == refresh.drift_fingerprint([dict(b), dict(a)])
-    expected = "\n".join(sorted(["openai|tier_fast|input_price_per_1m|0.12",
-                                 "grok|tier_powerful|output_price_per_1m|30.0"]))
+    expected = "\n".join(sorted(["openai|tier_fast|input_price_per_1m|0.1|0.12",
+                                 "grok|tier_powerful|output_price_per_1m|25.0|30.0"]))
     assert fp == hashlib.sha256(expected.encode()).hexdigest()
     assert fp != refresh.drift_fingerprint([a, dict(b, feed=31.0)])
     assert refresh.drift_fingerprint([]) == hashlib.sha256(b"").hexdigest()
-    # extra keys (table, pct, model_id) do not affect it
-    assert fp == refresh.drift_fingerprint([dict(a, table=0.1, pct=20.0), b])
+    # extra keys (pct, model_id) do not affect it
+    assert fp == refresh.drift_fingerprint([dict(a, pct=20.0, model_id="m"), b])
+
+
+def test_fingerprint_changes_when_only_the_table_value_changes():
+    # main edits a field while the feed stays the same: the PR must be refreshed.
+    a = {"provider": "openai", "tier": "tier_fast", "field": "input_price_per_1m",
+         "table": 0.1, "feed": 0.12}
+    assert refresh.drift_fingerprint([a]) != refresh.drift_fingerprint([dict(a, table=0.11)])
 
 
 # ─── expiry ───────────────────────────────────────────────────────────────────
@@ -348,6 +357,8 @@ def test_cli_exit_2_when_feed_fails_everywhere(prices_file, tmp_path, monkeypatc
     assert code == 2
     data = json.loads(js.read_text())
     assert len(data["fetch_failed"]) == 6 and data["significant"] == []
+    # The table is valid, so the expiry fields are there for drift_pr.py to act on.
+    assert data["expires_on"] == "2026-12-29" and "expiry_warning" in data
     assert md.exists() and not prop.exists()
 
 
@@ -408,3 +419,110 @@ def test_cli_outputs_optional(prices_file, monkeypatch, capsys):
 
 def test_today_is_utc_date():
     assert isinstance(drift_check._today(), date)
+
+
+# ─── odd feed values (review finding 1) ───────────────────────────────────────
+
+@pytest.mark.parametrize("raw", ["-1", "-0.000001", "0", "0.0", 0, 0.0, -1, "inf", "-inf",
+                                 "Infinity", "nan", "NaN", True, False, "", "  ", "abc",
+                                 [], {}, None, "1e400"])
+def test_or_price_rejects_values_that_are_not_real_prices(raw):
+    assert refresh._or_price({"prompt": raw}, "prompt") is None
+
+
+@pytest.mark.parametrize("raw,expected", [("0.0000025", 2.5), (" 0.0000025 ", 2.5),
+                                          (2.5e-06, 2.5), ("1e-7", 0.1), (1, 1_000_000.0)])
+def test_or_price_accepts_finite_positive_numbers(raw, expected):
+    assert refresh._or_price({"prompt": raw}, "prompt") == pytest.approx(expected)
+
+
+def _feed_with(table, raw):
+    """_feed_for(table) with raw OpenRouter pricing values {(or_id, key): raw}."""
+    feed = _feed_for(table)
+    for m in feed["data"]:
+        for (or_id, key), value in raw.items():
+            if m["id"] == or_id:
+                m["pricing"][key] = value
+    return feed
+
+
+def test_unusable_field_is_skipped_and_usable_fields_still_compared(monkeypatch):
+    # anthropic: haiku's prompt is the variable-price marker "-1", but its completion
+    # really drifted (0.5 -> 0.6). Only the usable field becomes a change.
+    _stub_feed(monkeypatch, _feed_with(REAL, {
+        ("anthropic/claude-haiku-5.5", "prompt"): "-1",
+        ("anthropic/claude-haiku-5.5", "completion"): "0.0000006",
+    }))
+    rep = refresh.check_drift(copy.deepcopy(REAL))
+    p = next(x for x in rep["providers"] if x["provider_id"] == "anthropic")
+    assert p["status"] == "drift"
+    assert [(c["tier"], c["field"], c["new"]) for c in p["changes"]] == [
+        ("tier_fast", "output_price_per_1m", 0.6)]
+    assert "unusable" in p["detail"] and "input_price_per_1m" in p["detail"]
+
+
+def test_provider_with_only_unusable_fields_is_fetch_failed_not_drift(monkeypatch):
+    # Consistent with a missing model id: no usable change -> fetch_failed, which is
+    # never drift and never proposed (rather than a misleading "match").
+    _stub_feed(monkeypatch, _feed_with(REAL, {
+        ("openai/gpt-6-luna", "prompt"): "inf",
+        ("openai/gpt-6-luna", "completion"): True,
+    }))
+    rep = refresh.check_drift(copy.deepcopy(REAL))
+    p = next(x for x in rep["providers"] if x["provider_id"] == "openai")
+    assert p["status"] == "fetch_failed" and p["changes"] == []
+    sla = refresh.build_sla_report(rep, REAL, date(2026, 11, 20))
+    assert "openai" in sla["fetch_failed"] and sla["significant"] == []
+
+
+def test_absent_feed_key_is_not_counted_as_unusable(monkeypatch):
+    # A key the feed simply does not carry (no cache price) stays silently skipped.
+    feed = _feed_for(REAL)
+    for m in feed["data"]:
+        m["pricing"].pop("input_cache_read", None)
+    _stub_feed(monkeypatch, feed)
+    rep = refresh.check_drift(copy.deepcopy(REAL))
+    assert {p["status"] for p in rep["providers"] if p["strategy"] == "openrouter"} == {"match"}
+
+
+def test_reviewer_odd_feed_proposes_nothing_and_stays_strict_json(prices_file, tmp_path, monkeypatch):
+    # The reviewer's demo feed: -1, inf, 0, True and nan must never become prices.
+    _stub_feed(monkeypatch, _feed_with(REAL, {
+        ("anthropic/claude-haiku-5.5", "prompt"): "-1",
+        ("anthropic/claude-haiku-5.5", "completion"): "-1",
+        ("anthropic/claude-sonnet-5.5", "prompt"): "inf",
+        ("anthropic/claude-opus-5.5", "prompt"): "0",
+        ("anthropic/claude-opus-5.5", "completion"): True,
+        ("openai/gpt-6-luna", "prompt"): "nan",
+    }))
+    code, js, md, prop = _run(tmp_path)
+    data = json.loads(js.read_text())
+    assert code == 0 and data["significant"] == [] and data["minor"] == []
+    assert not prop.exists()
+    assert set(data["fetch_failed"]) == {"anthropic", "openai"}
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan"), 0, 0.0, -1.0, True, "0.1"])
+def test_apply_significant_refuses_non_finite_or_non_positive(bad):
+    sig = [{"provider": "openai", "tier": "tier_fast", "field": "input_price_per_1m",
+            "table": 0.1, "feed": bad}]
+    with pytest.raises(ValueError):
+        refresh.apply_significant(TABLE, sig)
+
+
+def test_cli_never_writes_a_bad_proposal(prices_file, tmp_path, monkeypatch):
+    # Second line of defence: even if a bad number reached the significant list,
+    # the proposal writer refuses it and the run fails (exit 1) with no proposal.
+    real_build = refresh.build_sla_report
+
+    def poisoned(*a, **kw):
+        sla = real_build(*a, **kw)
+        sla["significant"] = [{"provider": "openai", "tier": "tier_fast", "model_id": "gpt-6-luna",
+                               "field": "input_price_per_1m", "table": 0.1,
+                               "feed": float("inf"), "pct": None}]
+        return sla
+    _stub_feed(monkeypatch, _feed_for(REAL))
+    monkeypatch.setattr(refresh, "build_sla_report", poisoned)
+    monkeypatch.setattr(refresh, "render_drift_markdown", lambda *a, **k: "md\n")
+    code, js, md, prop = _run(tmp_path)
+    assert code == 1 and not prop.exists()
