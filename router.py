@@ -1,11 +1,12 @@
 """
 Routing decision engine for cheaprouter.
 
-Selects the cheapest available provider given a tier and constraints.
-Priority order (configurable via env):
-  1. Price (always primary). Exact cost ties break on latency, then provider_id
-     (pricing.ranking_key, ST6), so the result never depends on the order of
-     providers in prices.json.
+Selects the cheapest available (provider, model) pair given a tier and
+constraints. A provider may list several models in a tier (SC3a); each is a
+separate candidate. Priority order (configurable via env):
+  1. Price (always primary). Exact cost ties break on latency, then provider_id,
+     then model_id (pricing.ranking_key, ST6/SC3a), so the result never depends
+     on the order of providers or models in prices.json.
   2. Availability (provider must have API key configured)
   3. Latency (exclude high-latency providers when latency_sensitive=True)
   4. Region preference (optional allow/block lists)
@@ -42,7 +43,8 @@ class RoutingDecision:
     tier: str
     latency_sensitive: bool
     deprioritized: list = None    # provider_ids sunk to the back for poor health (S8)
-    ranked_pool: list = None      # eligible provider_ids in routing order — the failover sequence (S2)
+    ranked_pool: list = None      # eligible provider_ids in routing order, each once (S2)
+    ranked_entries: list = None   # eligible {provider_id, model_id} in routing order — the failover sequence (SC3a)
 
     def to_dict(self) -> dict:
         return {
@@ -54,6 +56,7 @@ class RoutingDecision:
             "latency_sensitive": self.latency_sensitive,
             "deprioritized": self.deprioritized or [],
             "ranked_pool": self.ranked_pool or [],
+            "ranked_entries": [dict(e) for e in (self.ranked_entries or [])],
         }
 
 
@@ -111,7 +114,8 @@ def route(
             allowed_regions=allowed_regions,
         )
         if reason:
-            excluded.append({"provider_id": est.provider_id, "reason": reason})
+            excluded.append({"provider_id": est.provider_id, "model_id": est.model_id,
+                             "reason": reason})
         else:
             pool.append(est)
 
@@ -138,10 +142,11 @@ def route(
             except Exception:
                 snap = {}
         from health import is_healthy
-        # stable partition: healthy first (cost order preserved), unhealthy after
+        # stable partition: healthy first (cost order preserved), unhealthy after.
+        # Health is per provider (ST5): every model of an unhealthy provider sinks.
         healthy_pool = [e for e in pool if is_healthy(e.provider_id, snap)]
         unhealthy_pool = [e for e in pool if not is_healthy(e.provider_id, snap)]
-        deprioritized = [e.provider_id for e in unhealthy_pool]
+        deprioritized = _unique(e.provider_id for e in unhealthy_pool)
         pool = healthy_pool + unhealthy_pool
 
     winner = pool[0]
@@ -162,8 +167,22 @@ def route(
         latency_sensitive=latency_sensitive,
     )
     decision.deprioritized = deprioritized
-    decision.ranked_pool = [e.provider_id for e in pool]
+    # ranked_pool keeps its pre-SC3a meaning and type: provider_ids, each once,
+    # in the order their first (cheapest) model ranks. ranked_entries is the full
+    # failover sequence, one entry per (provider, model).
+    decision.ranked_pool = _unique(e.provider_id for e in pool)
+    decision.ranked_entries = [{"provider_id": e.provider_id, "model_id": e.model_id}
+                               for e in pool]
     return decision
+
+
+def _unique(items) -> list:
+    """Items in first-seen order, each once."""
+    out: list = []
+    for x in items:
+        if x not in out:
+            out.append(x)
+    return out
 
 
 def _exclusion_reason(

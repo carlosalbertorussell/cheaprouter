@@ -48,6 +48,110 @@ def _parse_verified_at(raw: str) -> date:
         raise PriceTableError(f"verified_at must be an ISO date 'YYYY-MM-DD', got {raw!r}") from exc
 
 
+def tier_models(entry) -> list:
+    """The model objects of one `models.<tier>` value (SC3a).
+
+    A tier is either one model object (the original form) or a non-empty list of
+    model objects. Both normalise to a list here, so every consumer of the raw
+    table iterates a tier the same way. Validation is validate_providers()'s job;
+    this only adapts the shape (a dict becomes a one-item list)."""
+    if isinstance(entry, dict):
+        return [entry]
+    if isinstance(entry, list):
+        return list(entry)
+    raise PriceTableError(f"tier value must be a model object or a list of them, got {type(entry).__name__}")
+
+
+def find_model(entry, model_id: str) -> Optional[dict]:
+    """The model object with this model_id in one `models.<tier>` value, or None."""
+    for m in tier_models(entry):
+        if m.get("model_id") == model_id:
+            return m
+    return None
+
+
+def validate_providers(providers: dict) -> None:
+    """Validate every provider's models (and its refresh ids). Raises
+    PriceTableError on the first problem; never repairs anything."""
+    for pid, prov in providers.items():
+        models = prov.get("models")
+        if not isinstance(models, dict) or not models:
+            raise PriceTableError(f"Provider '{pid}' has no models.")
+        for tier, entry in models.items():
+            if isinstance(entry, list):
+                if not entry:
+                    raise PriceTableError(f"Provider '{pid}' tier '{tier}' is an empty list; "
+                                          f"list at least one model or drop the tier.")
+            elif not isinstance(entry, dict):
+                raise PriceTableError(f"Provider '{pid}' tier '{tier}' must be a model object "
+                                      f"or a non-empty list of model objects.")
+            seen: set = set()
+            for i, m in enumerate(tier_models(entry)):
+                where = f"Provider '{pid}' tier '{tier}'" + (f" model #{i}" if isinstance(entry, list) else "")
+                if not isinstance(m, dict):
+                    raise PriceTableError(f"{where} is not a model object.")
+                miss = _REQUIRED_MODEL - m.keys()
+                if miss:
+                    raise PriceTableError(f"{where} missing fields: {sorted(miss)}")
+                if not isinstance(m["model_id"], str) or not m["model_id"]:
+                    raise PriceTableError(f"{where} has invalid model_id: {m['model_id']!r}")
+                for f in ("input_price_per_1m", "output_price_per_1m"):
+                    if not isinstance(m[f], (int, float)) or m[f] < 0:
+                        raise PriceTableError(f"{where} has invalid {f}: {m[f]!r}")
+                if m["model_id"] in seen:
+                    raise PriceTableError(f"Provider '{pid}' tier '{tier}' lists model_id "
+                                          f"'{m['model_id']}' more than once.")
+                seen.add(m["model_id"])
+        _validate_refresh_ids(pid, prov)
+
+
+def _validate_refresh_ids(pid: str, prov: dict) -> None:
+    """refresh.ids maps a tier to one OpenRouter id (a string) or, per model, a
+    {model_id: openrouter_id} object. A string is only allowed for a tier with a
+    single model: for several it would be ambiguous."""
+    ids = (prov.get("refresh") or {}).get("ids")
+    if ids is None:
+        return
+    if not isinstance(ids, dict):
+        raise PriceTableError(f"Provider '{pid}' refresh.ids must be an object.")
+    for tier, ref in ids.items():
+        if tier not in prov["models"]:
+            raise PriceTableError(f"Provider '{pid}' refresh.ids names tier '{tier}', "
+                                  f"which has no models.")
+        model_ids = [m["model_id"] for m in tier_models(prov["models"][tier])]
+        if isinstance(ref, str):
+            if len(model_ids) > 1:
+                raise PriceTableError(
+                    f"Provider '{pid}' refresh.ids['{tier}'] is one id but the tier lists "
+                    f"{len(model_ids)} models; map each model: {{model_id: openrouter_id}}.")
+        elif isinstance(ref, dict):
+            for mid, or_id in ref.items():
+                if mid not in model_ids:
+                    raise PriceTableError(f"Provider '{pid}' refresh.ids['{tier}'] names "
+                                          f"model_id '{mid}', which tier '{tier}' does not list.")
+                if not isinstance(or_id, str) or not or_id:
+                    raise PriceTableError(f"Provider '{pid}' refresh.ids['{tier}']['{mid}'] "
+                                          f"must be a non-empty string.")
+        else:
+            raise PriceTableError(f"Provider '{pid}' refresh.ids['{tier}'] must be a string "
+                                  f"or a {{model_id: openrouter_id}} object.")
+
+
+def openrouter_id(ids: dict, tier: str, model_id: str, n_models: int = 1) -> Optional[str]:
+    """The OpenRouter id refresh.ids gives one model of a tier, or None when the
+    model is not mapped (it is then not checked against the feed). A plain string
+    on a tier of several models is ambiguous and raises, as validation does."""
+    ref = (ids or {}).get(tier)
+    if isinstance(ref, str):
+        if n_models > 1:
+            raise PriceTableError(f"refresh.ids['{tier}'] is one id for {n_models} models; "
+                                  f"map each model: {{model_id: openrouter_id}}.")
+        return ref
+    if isinstance(ref, dict):
+        return ref.get(model_id)
+    return None
+
+
 def _load_raw() -> dict:
     prices_file = _prices_file()
     if not prices_file.exists():
@@ -68,17 +172,7 @@ def _load_raw() -> dict:
         raise PriceTableError("Price table 'providers' must be a non-empty object.")
 
     # Validate every model entry so a truncated file can't slip through.
-    for pid, prov in data["providers"].items():
-        models = prov.get("models")
-        if not isinstance(models, dict) or not models:
-            raise PriceTableError(f"Provider '{pid}' has no models.")
-        for tier, m in models.items():
-            miss = _REQUIRED_MODEL - m.keys()
-            if miss:
-                raise PriceTableError(f"Provider '{pid}' tier '{tier}' missing fields: {sorted(miss)}")
-            for f in ("input_price_per_1m", "output_price_per_1m"):
-                if not isinstance(m[f], (int, float)) or m[f] < 0:
-                    raise PriceTableError(f"Provider '{pid}' tier '{tier}' has invalid {f}: {m[f]!r}")
+    validate_providers(data["providers"])
 
     # Validate the date up front.
     _parse_verified_at(data["verified_at"])

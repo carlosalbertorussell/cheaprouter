@@ -84,7 +84,8 @@ def test_estimate_exact_costs_and_savings(env):
     assert (w["input_cost_usd"], w["output_cost_usd"], w["total_cost_usd"]) == (1.0, 1.0, 2.0)
     # openai: 1M * $3 + 0.5M * $4 = 3.0 + 2.0 = 5.0 → saved 3.0 (60%)
     assert out["savings"] == {"saved_usd": 3.0, "saved_pct": 60.0,
-                              "vs_provider": "OpenAI", "vs_cost_usd": 5.0}
+                              "vs_provider": "OpenAI", "vs_model_id": "gpt-6-luna",
+                              "vs_cost_usd": 5.0}
 
 
 def test_estimate_exact_cached_input_split(env):
@@ -143,7 +144,8 @@ def test_route_savings_at_actual_tokens(env, monkeypatch):
     # groq 0.001 + 0.001 = 0.002; openai 0.003 + 0.002 = 0.005 → saved 0.003 (60%)
     assert out["cost"]["actual_cost_usd"] == 0.002
     assert out["cost"]["savings"] == {"saved_usd": 0.003, "saved_pct": 60.0,
-                                      "vs_provider": "OpenAI", "vs_cost_usd": 0.005,
+                                      "vs_provider": "OpenAI", "vs_model_id": "gpt-6-luna",
+                                      "vs_cost_usd": 0.005,
                                       "vs_provider_id": "openai"}
     # pre-flight: groq 5*1e-6 + 500*2e-6 = 0.001005; openai 0.000015 + 0.002 = 0.002015
     assert out["cost"]["estimated_savings"]["saved_usd"] == 0.00101
@@ -157,7 +159,8 @@ def test_route_savings_after_failover_to_baseline_is_zero(env, monkeypatch):
     out = _route(env.server, api_keys={"groq": FAKE, "openai": FAKE}, max_failover=1)
     assert out["routing"]["provider_id"] == "openai"
     assert out["cost"]["savings"] == {"saved_usd": 0.0, "saved_pct": 0.0,
-                                      "vs_provider": "OpenAI", "vs_cost_usd": 0.005,
+                                      "vs_provider": "OpenAI", "vs_model_id": "gpt-6-luna",
+                                      "vs_cost_usd": 0.005,
                                       "vs_provider_id": "openai"}
 
 

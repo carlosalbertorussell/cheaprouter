@@ -145,7 +145,7 @@ def test_404_fails_over_to_next_provider(route_env, mock_http):
     assert out["response"] == "ok"
     r = out["routing"]
     assert r["provider_id"] == "openai" and r["failed_over"] is True
-    groq_model = providers.PROVIDERS["groq"].models["tier_fast"].model_id
+    groq_model = providers.PROVIDERS["groq"].model_for("tier_fast").model_id
     assert r["attempts"][0] == {"provider_id": "groq", "model_id": groq_model,
                                 "outcome": "model_unavailable",
                                 "error_class": r["attempts"][0]["error_class"]}

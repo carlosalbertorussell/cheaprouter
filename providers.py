@@ -54,13 +54,27 @@ class ProviderConfig:
     base_url: str
     api_key_env: str     # env var name — stdio / opt-in fallback only
     protocol: str        # "anthropic" | "openai" | "gemini"
-    models: dict[str, ModelConfig] = field(default_factory=dict)
+    # tier -> the models this provider offers in it, in prices.json order (SC3a).
+    # A tier written as one object in prices.json is a one-item list here.
+    models: dict[str, list[ModelConfig]] = field(default_factory=dict)
     enabled: bool = True
     extra_headers: dict[str, str] = field(default_factory=dict)
 
     @property
     def latency_ms(self) -> int:
         return REGION_LATENCY_MS.get(self.region, 250)
+
+    def models_for(self, tier: str) -> list[ModelConfig]:
+        """Every model this provider lists in a tier (empty when it has none)."""
+        return list(self.models.get(tier) or [])
+
+    def model_for(self, tier: str, model_id: Optional[str] = None) -> Optional[ModelConfig]:
+        """One model of a tier: the one with `model_id`, or the first listed when
+        model_id is None. None when the tier or the model is absent."""
+        for m in self.models_for(tier):
+            if model_id is None or m.model_id == model_id:
+                return m
+        return None
 
 
 # ─── Key resolution (BYOK) ────────────────────────────────────────────────────
@@ -133,26 +147,33 @@ def configured_providers(user_keys: dict[str, str]) -> dict[str, ProviderConfig]
 # REGION_LATENCY_MS) is unchanged in name and signature. Only the source of the
 # numbers moved — from literals here to the versioned table.
 
-from pricing_table import raw_table
+from pricing_table import raw_table, tier_models, validate_providers
+
+
+def _model_config(m: dict) -> ModelConfig:
+    return ModelConfig(
+        model_id=m["model_id"],
+        input_price_per_1m=float(m["input_price_per_1m"]),
+        output_price_per_1m=float(m["output_price_per_1m"]),
+        context_window=int(m["context_window"]),
+        cached_input_price_per_1m=(
+            float(m["cached_input_price_per_1m"])
+            if m.get("cached_input_price_per_1m") is not None else None
+        ),
+    )
 
 
 def _build_providers(table: Optional[dict] = None) -> dict[str, ProviderConfig]:
-    """Build the registry from a price table (default: the validated prices.json)."""
+    """Build the registry from a price table (default: the validated prices.json).
+    A table passed in is validated the same way prices.json is (SC3a), so a
+    synthetic table can't carry an empty or duplicated tier either."""
     table = raw_table() if table is None else table
+    validate_providers(table["providers"])
     registry: dict[str, ProviderConfig] = {}
     for pid, p in table["providers"].items():
         models = {
-            tier: ModelConfig(
-                model_id=m["model_id"],
-                input_price_per_1m=float(m["input_price_per_1m"]),
-                output_price_per_1m=float(m["output_price_per_1m"]),
-                context_window=int(m["context_window"]),
-                cached_input_price_per_1m=(
-                    float(m["cached_input_price_per_1m"])
-                    if m.get("cached_input_price_per_1m") is not None else None
-                ),
-            )
-            for tier, m in p["models"].items()
+            tier: [_model_config(m) for m in tier_models(entry)]
+            for tier, entry in p["models"].items()
         }
         registry[pid] = ProviderConfig(
             name=p["name"],

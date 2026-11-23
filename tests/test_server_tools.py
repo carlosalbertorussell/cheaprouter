@@ -46,7 +46,7 @@ def test_get_pricing_cheapest_among_callers_keys(route_env):
     out = _run(s.arbitrage_get_pricing(s.GetPricingInput(
         tier="tier_fast", api_keys={"anthropic": FAKE})))
     import providers
-    m = providers.PROVIDERS["anthropic"].models["tier_fast"]
+    m = providers.PROVIDERS["anthropic"].model_for("tier_fast")
     assert f"**Cheapest (your keys):** Anthropic (`{m.model_id}`)" in out
     assert "No api_keys supplied" not in out
     assert out.count("✅") == 1                    # only the keyed provider is configured

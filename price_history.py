@@ -143,32 +143,51 @@ def record_change(
     return entry
 
 
+def _old_model(old_entry, new_entry, model: dict) -> dict:
+    """The old table's counterpart of one new model (SC3a): the same model_id in
+    the same tier. When both tiers hold exactly one model, the old one is the
+    counterpart even under a new model_id (a migration), as before SC3a."""
+    from pricing_table import find_model, tier_models
+    if old_entry is None:
+        return {}
+    found = find_model(old_entry, model.get("model_id"))
+    if found is not None:
+        return found
+    olds = tier_models(old_entry)
+    if len(olds) == 1 and len(tier_models(new_entry)) == 1:
+        return olds[0]
+    return {}
+
+
 def record_diff(old_table: dict, new_table: dict, *, provenance_tier: str,
                 source: Optional[str] = None, backend: Optional[HistoryBackend] = None) -> list[dict]:
     """
     Diff two price tables (raw prices.json dicts) and append an entry per changed
     price field. The bridge from a verified table update to the history series.
     """
+    from pricing_table import tier_models   # lazy: importing it loads prices.json
     be = backend or get_backend()
     entries = []
     op = old_table.get("providers", {})
     npv = new_table.get("providers", {})
     for pid, prov in npv.items():
-        for tier, model in prov.get("models", {}).items():
-            old_model = op.get(pid, {}).get("models", {}).get(tier, {})
-            for field in ("input_price_per_1m", "output_price_per_1m", "cached_input_price_per_1m"):
-                if field not in model:
-                    continue
-                new_val = float(model[field])
-                old_raw = old_model.get(field)
-                old_val = float(old_raw) if old_raw is not None else None
-                # Record when the field is genuinely new (old_val is None) or changed.
-                if old_val is None or abs(new_val - old_val) > 1e-9:
-                    e = build_entry(provider=pid, model_id=model.get("model_id", ""),
-                                    tier=tier, field=field, old=old_val, new=new_val,
-                                    provenance_tier=provenance_tier, source=source)
-                    be.append(e)
-                    entries.append(e)
+        for tier, entry in prov.get("models", {}).items():
+            old_entry = op.get(pid, {}).get("models", {}).get(tier)
+            for model in tier_models(entry):
+                old_model = _old_model(old_entry, entry, model)
+                for field in ("input_price_per_1m", "output_price_per_1m", "cached_input_price_per_1m"):
+                    if field not in model:
+                        continue
+                    new_val = float(model[field])
+                    old_raw = old_model.get(field)
+                    old_val = float(old_raw) if old_raw is not None else None
+                    # Record when the field is genuinely new (old_val is None) or changed.
+                    if old_val is None or abs(new_val - old_val) > 1e-9:
+                        e = build_entry(provider=pid, model_id=model.get("model_id", ""),
+                                        tier=tier, field=field, old=old_val, new=new_val,
+                                        provenance_tier=provenance_tier, source=source)
+                        be.append(e)
+                        entries.append(e)
     return entries
 
 

@@ -29,7 +29,7 @@ from typing import Optional
 
 import httpx
 
-from pricing_table import raw_table
+from pricing_table import find_model, openrouter_id, raw_table, tier_models
 
 FETCH_TIMEOUT = 15.0
 
@@ -40,7 +40,7 @@ class ProviderDrift:
     strategy: str
     status: str                       # "match" | "drift" | "fetch_failed" | "manual"
     detail: str = ""
-    changes: list = field(default_factory=list)   # [{tier, field, old, new}]
+    changes: list = field(default_factory=list)   # [{tier, model_id, field, old, new}]
 
     def to_dict(self) -> dict:
         return {
@@ -73,6 +73,9 @@ def _fetch_json(url: str) -> Optional[dict]:
 #   2. Its prices are PER-TOKEN strings (e.g. "0.0000025"); our table is
 #      per-1M-tokens, so every value is multiplied by 1_000_000.
 # A model opts in with refresh: {"strategy": "openrouter", "ids": {tier: "<or-id>"}}.
+# A tier that lists several models (SC3a) maps each one by its model_id instead:
+#     "ids": {"tier_fast": {"<model_id>": "<or-id>", "<model_id>": "<or-id>"}}
+# The plain string stays valid for a one-model tier; pricing_table validates both.
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 _PER_TOKEN_TO_PER_1M = 1_000_000
@@ -181,12 +184,12 @@ def check_drift(table: Optional[dict] = None) -> dict:
                 results.append(ProviderDrift(pid, strategy, "fetch_failed",
                                detail=f"Could not fetch or parse {OPENROUTER_MODELS_URL}"))
                 continue
-            ids = refresh.get("ids", {})   # {tier: "<openrouter model id>"}
+            ids = refresh.get("ids", {})   # {tier: "<or-id>" | {model_id: "<or-id>"}}
             changes = []
             missing = []
             unusable = []   # feed carries the key, but not a real price ("-1", "0", "inf", true, ...)
-            for tier, model in prov["models"].items():
-                or_id = ids.get(tier)
+            for tier, model, n in _each_model(prov):
+                or_id = openrouter_id(ids, tier, model.get("model_id"), n)
                 if not or_id:
                     continue
                 pricing = _or_index.get(or_id)
@@ -208,7 +211,8 @@ def check_drift(table: Optional[dict] = None) -> dict:
                     # OpenRouter values are already per-1M after conversion; compare
                     # with a small relative tolerance to avoid float-noise drifts.
                     if abs(fetched - current) > max(1e-9, 1e-6 * current):
-                        changes.append({"tier": tier, "field": field_name,
+                        changes.append({"tier": tier, "model_id": model.get("model_id"),
+                                        "field": field_name,
                                         "old": current, "new": round(fetched, 8)})
             if missing or unusable:
                 parts = []
@@ -241,7 +245,9 @@ def check_drift(table: Optional[dict] = None) -> dict:
                 continue
 
             changes = []
-            for tier, model in prov["models"].items():
+            for tier, model, n in _each_model(prov):
+                if n > 1:
+                    continue   # the json_api map is per tier: one model only
                 tier_map = price_map.get(tier, {})
                 for field_name in ("input_price_per_1m", "output_price_per_1m"):
                     path = tier_map.get(field_name)
@@ -252,7 +258,8 @@ def check_drift(table: Optional[dict] = None) -> dict:
                         continue
                     current = float(model[field_name])
                     if abs(fetched - current) > 1e-9:
-                        changes.append({"tier": tier, "field": field_name,
+                        changes.append({"tier": tier, "model_id": model.get("model_id"),
+                                        "field": field_name,
                                         "old": current, "new": fetched})
             if changes:
                 results.append(ProviderDrift(pid, strategy, "drift",
@@ -281,6 +288,30 @@ def check_drift(table: Optional[dict] = None) -> dict:
     }
 
 
+def _each_model(prov: dict):
+    """(tier, model dict, number of models in that tier) for every model a
+    provider lists, in prices.json order (SC3a)."""
+    for tier, entry in prov.get("models", {}).items():
+        ms = tier_models(entry)
+        for m in ms:
+            yield tier, m, len(ms)
+
+
+def _target_model(table: dict, provider: str, tier: str, model_id: Optional[str]) -> dict:
+    """The model dict a change applies to. A change names its model_id; one
+    without (a pre-SC3a report) is only unambiguous on a one-model tier."""
+    entry = table["providers"][provider]["models"][tier]
+    if model_id is not None:
+        m = find_model(entry, model_id)
+        if m is None:
+            raise KeyError(f"{provider} {tier} lists no model {model_id!r}")
+        return m
+    ms = tier_models(entry)
+    if len(ms) != 1:
+        raise KeyError(f"{provider} {tier} lists {len(ms)} models; the change must name a model_id")
+    return ms[0]
+
+
 def propose_updated_table(report: dict, table: Optional[dict] = None) -> dict:
     """
     Build a CANDIDATE price table applying only the drifts found by check_drift().
@@ -296,7 +327,7 @@ def propose_updated_table(report: dict, table: Optional[dict] = None) -> dict:
             continue
         pid = prov_report["provider_id"]
         for ch in prov_report["changes"]:
-            t["providers"][pid]["models"][ch["tier"]][ch["field"]] = ch["new"]
+            _target_model(t, pid, ch["tier"], ch.get("model_id"))[ch["field"]] = ch["new"]
     # Deliberately do NOT touch verified_at here. A human sets it on confirmation.
     t["_candidate"] = True
     return t
@@ -315,7 +346,8 @@ def format_drift_report(report: dict) -> str:
         tag = {"match": "✓", "drift": "≠", "fetch_failed": "✗", "manual": "…"}.get(p["status"], "?")
         lines.append(f"  {tag} {p['provider_id']:10s} [{p['strategy']}] {p['detail']}")
         for ch in p.get("changes", []):
-            lines.append(f"        {ch['tier']}.{ch['field']}: {ch['old']} → {ch['new']}")
+            where = ch["tier"] + (f"[{ch['model_id']}]" if ch.get("model_id") else "")
+            lines.append(f"        {where}.{ch['field']}: {ch['old']} → {ch['new']}")
     if s["drifts"]:
         lines.append("")
         lines.append("Review the proposed changes, verify against the provider's pricing page,")
@@ -353,7 +385,7 @@ def observed_validation(table: Optional[dict] = None, limit: int = 1000) -> dict
     # index verified prices: (provider, model_id, field) -> price
     verified = {}
     for pid, prov in t["providers"].items():
-        for tier, m in prov.get("models", {}).items():
+        for tier, m, _n in _each_model(prov):
             mid = m.get("model_id")
             for field in ("input_price_per_1m", "output_price_per_1m"):
                 if field in m:
@@ -457,10 +489,17 @@ def classify_drift(report: dict, table: dict,
         for ch in p.get("changes", []):
             old, new = float(ch["old"]), float(ch["new"])
             pct = drift_pct(old, new)
+            model_id = ch.get("model_id")
+            if model_id is None:   # a pre-SC3a change: the tier's only model
+                ms = tier_models(models[ch["tier"]]) if ch["tier"] in models else []
+                if len(ms) > 1:
+                    raise ValueError(f"{pid} {ch['tier']} lists {len(ms)} models; "
+                                     f"the change must name a model_id")
+                model_id = ms[0].get("model_id") if ms else None
             item = {
                 "provider": pid,
                 "tier": ch["tier"],
-                "model_id": models.get(ch["tier"], {}).get("model_id"),
+                "model_id": model_id,
                 "field": ch["field"],
                 "table": old,
                 "feed": new,
@@ -469,7 +508,9 @@ def classify_drift(report: dict, table: dict,
             (significant if is_significant(old, new, threshold_pct) else minor).append(item)
 
     def key(c):
-        return (c["provider"], c["tier"], c["field"])
+        # model_id sits before field so a multi-model tier's changes group by
+        # model; within a one-model tier it is constant, so the order is as before.
+        return (c["provider"], c["tier"], c["model_id"] or "", c["field"])
 
     return {
         "significant": sorted(significant, key=key),
@@ -496,15 +537,29 @@ def expiry_status(table: dict, today: date,
     }
 
 
-def drift_fingerprint(significant: list) -> str:
+def drift_fingerprint(significant: list, table: Optional[dict] = None) -> str:
     """sha256 hex of the sorted significant set, one 'provider|tier|field|table|feed'
     line each. Independent of input order. It changes when the proposed number
     changes, and also when the table value on the default branch changes while
-    the feed stays the same, so the PR is refreshed against the new base."""
-    lines = sorted(f"{c['provider']}|{c['tier']}|{c['field']}|"
-                   f"{float(c['table'])!r}|{float(c['feed'])!r}"
-                   for c in significant)
+    the feed stays the same, so the PR is refreshed against the new base.
+
+    SC3a: a change on a tier that lists several models (per `table`) appends
+    '|model_id', so two models of one tier drifting the same way can't share a
+    fingerprint. A one-model tier keeps the original line, so fingerprints of
+    drift PRs opened before SC3a stay the same and a closed one is not reopened."""
+    def line(c):
+        base = (f"{c['provider']}|{c['tier']}|{c['field']}|"
+                f"{float(c['table'])!r}|{float(c['feed'])!r}")
+        if table is not None and _models_in_tier(table, c["provider"], c["tier"]) > 1:
+            base += f"|{c['model_id']}"
+        return base
+    lines = sorted(line(c) for c in significant)
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+def _models_in_tier(table: dict, provider: str, tier: str) -> int:
+    entry = table.get("providers", {}).get(provider, {}).get("models", {}).get(tier)
+    return 0 if entry is None else len(tier_models(entry))
 
 
 def no_feed_signal(report: dict) -> bool:
@@ -527,7 +582,7 @@ def build_sla_report(report: dict, table: dict, today: date,
         "minor": cls["minor"],
         "fetch_failed": cls["fetch_failed"],
         "manual": cls["manual"],
-        "fingerprint": drift_fingerprint(cls["significant"]),
+        "fingerprint": drift_fingerprint(cls["significant"], table),
     })
     return out
 
@@ -548,7 +603,7 @@ def apply_significant(table: dict, significant: list) -> dict:
     t = copy.deepcopy(table)
     t.pop("_candidate", None)
     for c in significant:
-        t["providers"][c["provider"]]["models"][c["tier"]][c["field"]] = c["feed"]
+        _target_model(t, c["provider"], c["tier"], c.get("model_id"))[c["field"]] = c["feed"]
     return t
 
 

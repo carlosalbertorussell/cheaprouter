@@ -136,7 +136,7 @@ class RouteCompletionInput(BaseModel):
     stream: bool = Field(False, description="Consume the provider's streaming endpoint (S5). Lowers time-to-first-token and reports it; the full text is still returned as one result at the end. Failover applies only before the first streamed token — a mid-stream error is terminal. Only Anthropic and OpenAI-compatible providers can stream; others fall back to a normal call.")
     session: Optional[str] = Field(None, description="Opaque session token to attribute spend to you. Reused across requests to track your own cumulative spend; never mapped to your identity.")
     health_aware: bool = Field(True, description="When True (default), providers that have been failing recently are deprioritized — moved behind all healthy providers whatever their price, but never excluded. Health is scored on the server's global history, shared across users, counting only provider-side failures (429/5xx/timeouts/connection errors, never bad keys or bad requests), capping how much any one session contributes, and requiring failures from at least two sessions by default. Set False for pure cheapest-first routing.")
-    max_failover: int = Field(2, description="On a transient error (429/5xx/timeout) or when a provider reports the model retired or unavailable, how many additional providers to try, in ranked order, before giving up. 0 disables failover. Other non-transient errors (bad key, bad request) never fail over.", ge=0, le=7)
+    max_failover: int = Field(2, description="On a transient error (429/5xx/timeout) or when a provider reports the model retired or unavailable, how many additional candidates to try, in ranked order, before giving up. A candidate is one provider's model: a provider listing several models in the tier is tried once per model, so a retired model can fall back to the same provider's next model. 0 disables failover. Other non-transient errors (bad key, bad request) never fail over.", ge=0, le=7)
 
     @field_validator("tier")
     @classmethod
@@ -236,33 +236,36 @@ async def _run_streaming(provider, model, api_key, messages, system_prompt, max_
     return result, (ttft_ms if ttft_ms is not None else latency_ms), started
 
 
-def _price_at(pid: str, tier: str, input_tokens: int, output_tokens: int,
+def _price_at(pid: str, model_id: str, tier: str, input_tokens: int, output_tokens: int,
               cached_input_tokens: int) -> CostEstimate:
-    """Price one provider at the given token counts with the same cache-aware
-    formula routing uses (pricing.CostEstimate.compute)."""
+    """Price one (provider, model) at the given token counts with the same
+    cache-aware formula routing uses (pricing.CostEstimate.compute)."""
     provider = PROVIDERS[pid]
     return CostEstimate.compute(
-        provider_id=pid, provider=provider, model=provider.models[tier], tier=tier,
+        provider_id=pid, provider=provider, model=provider.model_for(tier, model_id), tier=tier,
         input_tokens=input_tokens, output_tokens=output_tokens, user_keys={},
         cached_input_tokens=cached_input_tokens,
     )
 
 
-def _actual_savings(pool: list[str], used: CostEstimate, tier: str, input_tokens: int,
+def _actual_savings(pool: list[dict], used: CostEstimate, tier: str, input_tokens: int,
                     output_tokens: int, cached_input_tokens: int) -> Optional[dict]:
     """
-    Savings of the provider that actually answered, at the actual token counts.
+    Savings of the (provider, model) that actually answered, at the actual
+    token counts.
 
-    Baseline: the most expensive provider in the eligible (keyed, not excluded)
-    pool, every member priced at the same actual token counts and cache split.
-    None when the pool has a single provider (nothing to compare against).
-    Never negative: the used provider is itself in the pool.
+    Baseline: the most expensive entry in the eligible (keyed, not excluded)
+    pool — `pool` is decision.ranked_entries, one {provider_id, model_id} per
+    candidate model — every member priced at the same actual token counts and
+    cache split. None when the pool has a single entry (nothing to compare
+    against). Never negative: the used entry is itself in the pool.
     """
     if len(pool) < 2:
         return None
-    priced = [used if pid == used.provider_id else
-              _price_at(pid, tier, input_tokens, output_tokens, cached_input_tokens)
-              for pid in pool]
+    priced = [used if (e["provider_id"], e["model_id"]) == (used.provider_id, used.model_id)
+              else _price_at(e["provider_id"], e["model_id"], tier, input_tokens,
+                             output_tokens, cached_input_tokens)
+              for e in pool]
     baseline = max(priced, key=lambda e: e.total_cost_usd)
     savings = compute_savings(used, baseline)
     savings["vs_provider_id"] = baseline.provider_id
@@ -308,7 +311,8 @@ def _stale_price_refusal() -> Optional[str]:
 async def arbitrage_get_pricing(params: GetPricingInput) -> str:
     """
     Return a full price comparison table across all 8 providers for a given
-    capability tier and token volume.
+    capability tier and token volume, one row per model (a provider can list
+    several models in a tier).
 
     Pass api_keys to see which providers you have access to. Providers without
     a key are shown with a warning but pricing is still displayed for comparison.
@@ -449,8 +453,10 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
              actual cost (cache-aware), and savings of the provider that answered
              vs. the most expensive eligible provider, priced at the actual token
              counts (`savings.vs_provider_id` names it). `estimated_savings` is the
-             pre-flight figure for the routed winner. `routing.attempts` lists
-             each provider tried with its model ID and outcome (success,
+             pre-flight figure for the routed winner. `routing.model_id` is
+             the prices.json model that answered (`routing.model` is the ID
+             the provider reported). `routing.attempts` lists each
+             (provider, model) tried with its outcome (success,
              transient_error, model_unavailable, error, mid_stream_error);
              `routing.warnings` appears when a provider reported its prices.json
              model retired or unavailable.
@@ -482,10 +488,13 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
             "known_providers": PROVIDER_IDS,
         }, indent=2)
 
-    # Failover loop (S2): walk the ranked pool in order. On a transient error
-    # (429/5xx/timeout) move to the next provider. On a model-unavailable error
+    # Failover loop (S2): walk the ranked (provider, model) entries in order
+    # (SC3a: a provider listing several models in the tier has one entry per
+    # model, so a retired model falls through to the next-cheapest entry, which
+    # may be the same provider's next model). On a transient error
+    # (429/5xx/timeout) move to the next entry. On a model-unavailable error
     # (the provider retired or never had the prices.json model, ST6) also move on:
-    # the next provider serves a different model. On any other non-transient
+    # the next entry serves a different model. On any other non-transient
     # error (bad key/request) stop immediately since it would fail identically
     # everywhere. Every failed attempt is logged as a failure with its transient
     # flag; only transient (provider-side) failures count against S8 health
@@ -493,7 +502,8 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
     # not count: a caller can trigger one (OpenAI-style APIs return
     # model_not_found for a key without access), and deprioritizing would only
     # hide the configuration problem that routing.warnings reports.
-    ranked = decision.ranked_pool or [decision.winner.provider_id]
+    ranked = decision.ranked_entries or [{"provider_id": decision.winner.provider_id,
+                                          "model_id": decision.winner.model_id}]
     max_attempts = 1 + max(0, params.max_failover)
     sequence = ranked[:max_attempts]
 
@@ -503,12 +513,14 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
     warnings: list[str] = []    # operator-facing notes, e.g. a retired model (ST6)
     stream_ttft_ms = None       # time-to-first-token, set on a successful stream
 
-    for pid in sequence:
-        est = next((e for e in decision.all_estimates if e.provider_id == pid), None)
+    for entry in sequence:
+        pid = entry["provider_id"]
+        est = next((e for e in decision.all_estimates
+                    if (e.provider_id, e.model_id) == (pid, entry["model_id"])), None)
         if est is None:
             continue
         provider = PROVIDERS[pid]
-        model = provider.models[params.tier]
+        model = provider.model_for(params.tier, est.model_id)
         api_key = resolve_api_key(pid, params.api_keys)
 
         use_stream = params.stream and stream_supported(provider.protocol)
@@ -532,7 +544,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
                              "outcome": "success", "streamed": bool(use_stream)})
             # Actual cost and savings for the provider that answered, at the
             # actual token counts, with the same cache-aware pricing as routing.
-            actual = _price_at(pid, params.tier, completion.input_tokens_used,
+            actual = _price_at(pid, model.model_id, params.tier, completion.input_tokens_used,
                                completion.output_tokens_used, params.cached_input_tokens)
             actual_savings = _actual_savings(
                 ranked, actual, params.tier, completion.input_tokens_used,
@@ -543,6 +555,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
                                "winner": {**decision.to_dict()["winner"],
                                           "provider_id": pid,
                                           "provider_name": provider.name,
+                                          "model_id": model.model_id,
                                           "region": provider.region},
                                "savings": actual_savings},
                 session=params.session,
@@ -583,6 +596,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
                 decision_dict={**decision.to_dict(),
                                "winner": {"provider_id": pid,
                                           "provider_name": provider.name,
+                                          "model_id": model.model_id,
                                           "region": provider.region,
                                           "total_cost_usd": 0.0},
                                "savings": {"saved_usd": 0.0}},
@@ -595,7 +609,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
                 # Tokens already streamed — failover is unsafe. Terminal.
                 break
             if not transient and not unavailable:
-                break   # bad key/request → no point trying other providers
+                break   # bad key/request → no point trying other entries
 
     if completion is None:
         routing = decision.to_dict()
@@ -607,7 +621,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
             "routing": routing,
         }, indent=2)
 
-    model = PROVIDERS[used.provider_id].models[params.tier]
+    model = PROVIDERS[used.provider_id].model_for(params.tier, used.model_id)
 
     # SP1d — waist interaction: publish the OBSERVED signal (metadata-only) to the
     # shared price-history spine. The unit rates are the TABLE prices for the model
@@ -638,6 +652,7 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
             "provider": used.provider_name,
             "provider_id": used.provider_id,
             "model": completion.model_id,
+            "model_id": used.model_id,   # the prices.json model routed to (SC3a)
             "tier": params.tier,
             "region": used.region,
             "failed_over": len(attempts) > 1,
@@ -687,6 +702,12 @@ async def arbitrage_route_completion(params: RouteCompletionInput) -> str:
     return json.dumps(result, indent=2)
 
 
+def _tier_view(items: list):
+    """A tier's models for a response: the single object when the tier lists one
+    model (the pre-SC3a shape), else the list."""
+    return items[0] if len(items) == 1 else items
+
+
 @mcp.tool(
     name="arbitrage_provider_status",
     annotations={
@@ -729,14 +750,16 @@ async def arbitrage_provider_status(params: ProviderStatusInput) -> str:
             "region": prov.region,
             "latency_ms_from_bsas": prov.latency_ms,
             "protocol": prov.protocol,
+            # One object per tier, as before; a tier listing several models
+            # (SC3a) is a list of those objects, mirroring prices.json.
             "models": {
-                tier: {
+                tier: _tier_view([{
                     "model_id": m.model_id,
                     "input_price_per_1m_usd": m.input_price_per_1m,
                     "output_price_per_1m_usd": m.output_price_per_1m,
                     "context_window": m.context_window,
-                }
-                for tier, m in prov.models.items()
+                } for m in ms])
+                for tier, ms in prov.models.items()
             },
         }
 

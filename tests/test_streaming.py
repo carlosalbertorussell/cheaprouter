@@ -42,7 +42,7 @@ async def _collect(agen):
 def _stream(pid, system_prompt=None, max_tokens=64):
     import providers
     prov = providers.PROVIDERS[pid]
-    model = prov.models["tier_fast"]
+    model = prov.model_for("tier_fast")
     return asyncio.run(_collect(client.stream_provider(
         prov, model, FAKE_KEY, [{"role": "user", "content": "hi"}], system_prompt, max_tokens)))
 
@@ -121,7 +121,7 @@ def _run_streaming(pid):
     import providers
     prov = providers.PROVIDERS[pid]
     return asyncio.run(server._run_streaming(
-        prov, prov.models["tier_fast"], FAKE_KEY, [{"role": "user", "content": "hi"}], None, 64))
+        prov, prov.model_for("tier_fast"), FAKE_KEY, [{"role": "user", "content": "hi"}], None, 64))
 
 
 def test_run_streaming_assembles_result_and_ttft(mock_http):

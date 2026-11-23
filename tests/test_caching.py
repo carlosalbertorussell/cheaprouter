@@ -11,14 +11,14 @@ ALL_KEYS = {p: "k" for p in PROVIDERS}
 
 def _est(pid, tier, inp, out, cached):
     prov = PROVIDERS[pid]
-    return CostEstimate.compute(pid, prov, prov.models[tier], tier, inp, out, ALL_KEYS, cached)
+    return CostEstimate.compute(pid, prov, prov.model_for(tier), tier, inp, out, ALL_KEYS, cached)
 
 
 # ─── cost model ───────────────────────────────────────────────────────────────
 
 def test_no_cached_tokens_matches_plain_input():
     e = _est("deepseek", "tier_balanced", 1000, 500, 0)
-    prov = PROVIDERS["deepseek"].models["tier_balanced"]
+    prov = PROVIDERS["deepseek"].model_for("tier_balanced")
     expected_in = (1000 / 1_000_000) * prov.input_price_per_1m
     assert abs(e.input_cost_usd - expected_in) < 1e-9
 
@@ -32,7 +32,7 @@ def test_cached_tokens_cheaper_for_cache_provider():
 
 
 def test_cache_provider_splits_fresh_and_cached():
-    m = PROVIDERS["deepseek"].models["tier_balanced"]
+    m = PROVIDERS["deepseek"].model_for("tier_balanced")
     e = _est("deepseek", "tier_balanced", 10000, 0, 4000)
     fresh = (6000 / 1_000_000) * m.input_price_per_1m
     cachd = (4000 / 1_000_000) * m.cached_input_price_per_1m
@@ -52,7 +52,7 @@ def test_openai_cache_now_cheaper():
     plain = _est("openai", "tier_fast", 10000, 100, 0)
     cached = _est("openai", "tier_fast", 10000, 100, 9000)
     assert cached.cache_supported is True
-    m = PROVIDERS["openai"].models["tier_fast"]
+    m = PROVIDERS["openai"].model_for("tier_fast")
     expected = (1000 / 1_000_000) * m.input_price_per_1m + (9000 / 1_000_000) * m.cached_input_price_per_1m
     assert abs(cached.input_cost_usd - expected) < 1e-12
     assert cached.input_cost_usd < plain.input_cost_usd

@@ -121,7 +121,7 @@ def test_router_emits_observed_only_when_enabled(route_env, be, monkeypatch, fla
         assert rows == []
         return
     import providers
-    m = providers.PROVIDERS["groq"].models["tier_fast"]
+    m = providers.PROVIDERS["groq"].model_for("tier_fast")
     assert {r["field"] for r in rows} == {"input_price_per_1m", "output_price_per_1m"}
     assert all(r["provenance_tier"] == "observed" and r["provider"] == "groq" for r in rows)
     # The table's model ID (so validation can match it), with the provider's

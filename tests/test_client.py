@@ -17,7 +17,7 @@ MSGS = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "yo"
 def _prov(pid):
     import providers
     p = providers.PROVIDERS[pid]
-    return p, p.models["tier_fast"]
+    return p, p.model_for("tier_fast")
 
 
 def _call(pid, system_prompt=None, max_tokens=77):

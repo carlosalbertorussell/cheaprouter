@@ -58,7 +58,7 @@ def test_configured_providers_only_keyed():
 
 def test_valid_pricing_positive():
     for prov in PROVIDERS.values():
-        for model in prov.models.values():
+        for model in (m for ms in prov.models.values() for m in ms):
             assert model.input_price_per_1m > 0
             assert model.output_price_per_1m > 0
 
@@ -81,13 +81,13 @@ def test_get_provider():
 def test_groq_off_models_shut_down_2026_08_16():
     # SC1d: llama-3.1-8b-instant / llama-3.3-70b-versatile were shut down for
     # free and developer accounts (console.groq.com/docs/deprecations).
-    ids = {m.model_id for m in PROVIDERS["groq"].models.values()}
+    ids = {m.model_id for ms in PROVIDERS["groq"].models.values() for m in ms}
     assert ids == {"openai/gpt-oss-20b", "openai/gpt-oss-120b"}
-    fast = PROVIDERS["groq"].models["tier_fast"]
+    fast = PROVIDERS["groq"].model_for("tier_fast")
     assert (fast.input_price_per_1m, fast.output_price_per_1m,
             fast.cached_input_price_per_1m) == (0.075, 0.3, 0.037)
     for tier in ("tier_balanced", "tier_powerful"):
-        m = PROVIDERS["groq"].models[tier]
+        m = PROVIDERS["groq"].model_for(tier)
         assert (m.input_price_per_1m, m.output_price_per_1m,
                 m.cached_input_price_per_1m) == (0.15, 0.6, 0.075)
         assert m.context_window == 131072
@@ -108,7 +108,7 @@ def test_openai_cache_read_rates_modelled_sc1e():
             "tier_balanced": ("gpt-6.1-terra", 1.0, 5.0, 0.05),
             "tier_powerful": ("gpt-6.1-sol", 2.0, 10.0, 0.1)}
     for tier, row in want.items():
-        m = PROVIDERS["openai"].models[tier]
+        m = PROVIDERS["openai"].model_for(tier)
         assert (m.model_id, m.input_price_per_1m, m.output_price_per_1m,
                 m.cached_input_price_per_1m) == row
 
@@ -125,4 +125,4 @@ def test_context_windows_sc1e():
     }
     for pid, tiers in want.items():
         for tier, ctx in tiers.items():
-            assert PROVIDERS[pid].models[tier].context_window == ctx, (pid, tier)
+            assert PROVIDERS[pid].model_for(tier).context_window == ctx, (pid, tier)

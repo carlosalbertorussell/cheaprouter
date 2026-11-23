@@ -50,7 +50,8 @@ def _est(pid, name, total):
 
 def test_compute_savings():
     s = compute_savings(_est("a", "Cheap", 0.25), _est("b", "Dear", 1.0))
-    assert s == {"saved_usd": 0.75, "saved_pct": 75.0, "vs_provider": "Dear", "vs_cost_usd": 1.0}
+    assert s == {"saved_usd": 0.75, "saved_pct": 75.0, "vs_provider": "Dear", "vs_model_id": "m",
+                 "vs_cost_usd": 1.0}
 
 
 def test_compute_savings_zero_baseline_and_rounding():

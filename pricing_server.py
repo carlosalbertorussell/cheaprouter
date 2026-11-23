@@ -49,6 +49,7 @@ class PricingGetInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     provider: str = Field(..., description="Provider id, e.g. 'anthropic', 'deepseek'.")
     tier: str = Field(..., description="Capability tier: tier_fast / tier_balanced / tier_powerful.")
+    model_id: Optional[str] = Field(None, description="One model of the tier, when the provider lists several (SC3a). Omit for the tier's only model, or for all of them.")
 
 
 class PricingListInput(BaseModel):
@@ -101,7 +102,9 @@ def _table_prov_block() -> dict:
 )
 async def pricing_get(params: PricingGetInput) -> str:
     """
-    Verified price for one provider/model tier, provenance-first.
+    Verified price for one provider/model tier, provenance-first. When the
+    provider lists several models in the tier, all of them are returned under
+    `models` (or pass `model_id` for one).
 
     Leads with the provenance (tier, verified_at, source, staleness), then the
     prices. Only the `verified` tier is citable as authoritative.
@@ -110,7 +113,8 @@ async def pricing_get(params: PricingGetInput) -> str:
         params (PricingGetInput): provider id + capability tier.
 
     Returns:
-        str: JSON with provenance block + the model's input/output/cache prices.
+        str: JSON with provenance block + the model's input/output/cache prices
+             (or a `models` list for a tier of several models).
     """
     if params.tier not in VALID_TIERS:
         return json.dumps({"error": f"unknown tier '{params.tier}'", "valid": sorted(VALID_TIERS)})
@@ -118,28 +122,44 @@ async def pricing_get(params: PricingGetInput) -> str:
     if prov is None:
         return json.dumps({"error": f"unknown provider '{params.provider}'",
                            "known": sorted(PROVIDERS)})
-    m = prov.models.get(params.tier)
-    if m is None:
+    ms = prov.models_for(params.tier)
+    if not ms:
         return json.dumps({"error": f"provider '{params.provider}' has no '{params.tier}' tier"})
+    if params.model_id is not None:
+        ms = [m for m in ms if m.model_id == params.model_id]
+        if not ms:
+            return json.dumps({"error": f"provider '{params.provider}' lists no model "
+                                        f"'{params.model_id}' in '{params.tier}'",
+                               "known": [m.model_id for m in prov.models_for(params.tier)]})
 
     urls = raw_table().get("pricing_urls", {})
+    out = {
+        "provenance": {**_table_prov_block(), "source": urls.get(params.provider)},
+        "provider": params.provider,
+        "provider_name": prov.name,
+        "tier": params.tier,
+    }
+    if len(ms) == 1:
+        # One model: the flat pre-SC3a shape.
+        m = ms[0]
+        out.update({"model_id": m.model_id, "region": prov.region,
+                    "context_window": m.context_window, "price_per_1m_usd": _price_block(m)})
+    else:
+        # Several models in the tier (SC3a): every one, in prices.json order.
+        out.update({"region": prov.region, "models": [
+            {"model_id": m.model_id, "context_window": m.context_window,
+             "price_per_1m_usd": _price_block(m)} for m in ms]})
+    return json.dumps(out, indent=2)
+
+
+def _price_block(m) -> dict:
     price = {
         "input_price_per_1m": m.input_price_per_1m,
         "output_price_per_1m": m.output_price_per_1m,
     }
     if m.cached_input_price_per_1m is not None:
         price["cached_input_price_per_1m"] = m.cached_input_price_per_1m
-
-    return json.dumps({
-        "provenance": {**_table_prov_block(), "source": urls.get(params.provider)},
-        "provider": params.provider,
-        "provider_name": prov.name,
-        "tier": params.tier,
-        "model_id": m.model_id,
-        "region": prov.region,
-        "context_window": m.context_window,
-        "price_per_1m_usd": price,
-    }, indent=2)
+    return price
 
 
 @mcp.tool(
@@ -155,14 +175,14 @@ async def pricing_list(params: PricingListInput) -> str:
         params (PricingListInput): optional tier filter.
 
     Returns:
-        str: JSON with the provenance block + every provider/tier price.
+        str: JSON with the provenance block + one row per provider/tier/model.
     """
     if params.tier and params.tier not in VALID_TIERS:
         return json.dumps({"error": f"unknown tier '{params.tier}'", "valid": sorted(VALID_TIERS)})
     urls = raw_table().get("pricing_urls", {})
     rows = []
     for pid, prov in PROVIDERS.items():
-        for tier, m in prov.models.items():
+        for tier, m in ((t, m) for t, ms in prov.models.items() for m in ms):
             if params.tier and tier != params.tier:
                 continue
             entry = {

@@ -44,22 +44,30 @@ def carried_providers(table: dict) -> list[str]:
             if any(k.startswith(pid) and CARRIED_MARK in str(v) for k, v in notes.items())]
 
 
+def tier_models(entry) -> list:
+    """A tier's models: one object (the original form) or a list of them (SC3a).
+    Same rule as pricing_table.tier_models, without importing it (which would
+    load the shipped prices.json rather than the table passed in)."""
+    return [entry] if isinstance(entry, dict) else list(entry)
+
+
 def rows(table: dict) -> list[str]:
-    """One row per provider per distinct model/price, tiers merged (e.g. fast/balanced)."""
+    """One row per provider per distinct model/price, tiers merged (e.g. fast/balanced).
+    A tier listing several models (SC3a) gives each its own row."""
     carried = set(carried_providers(table))
     out = []
     for pid, p in table["providers"].items():
         groups: list[tuple[tuple, list[str]]] = []
         for tier in TIER_ORDER:
-            m = p["models"][tier]
-            key = (m["model_id"], m["input_price_per_1m"], m["output_price_per_1m"],
-                   m.get("cached_input_price_per_1m"))
-            for k, tiers in groups:
-                if k == key:
-                    tiers.append(TIER_LABEL[tier])
-                    break
-            else:
-                groups.append((key, [TIER_LABEL[tier]]))
+            for m in tier_models(p["models"][tier]):
+                key = (m["model_id"], m["input_price_per_1m"], m["output_price_per_1m"],
+                       m.get("cached_input_price_per_1m"))
+                for k, tiers in groups:
+                    if k == key:
+                        tiers.append(TIER_LABEL[tier])
+                        break
+                else:
+                    groups.append((key, [TIER_LABEL[tier]]))
         status = "carried, not re-read" if pid in carried else "re-read"
         for (model_id, inp, outp, cache), tiers in groups:
             out.append(f"| {p['name']} | {'/'.join(tiers)} | {model_id} | {_fmt(inp)} "

@@ -88,9 +88,9 @@ class CostEstimate:
 
 
 def ranking_key(e: "CostEstimate") -> tuple:
-    """Sort key for routing: cost, then latency, then provider_id (see
-    estimate_all_providers for why)."""
-    return (e.total_cost_usd, e.latency_ms, e.provider_id)
+    """Sort key for routing: cost, then latency, then provider_id, then model_id
+    (see estimate_all_providers for why)."""
+    return (e.total_cost_usd, e.latency_ms, e.provider_id, e.model_id)
 
 
 def estimate_all_providers(
@@ -102,10 +102,13 @@ def estimate_all_providers(
     cached_input_tokens: int = 0,
 ) -> list[CostEstimate]:
     """
-    Compute cost estimates for all providers at a given tier, cheapest first.
+    Compute cost estimates for every (provider, model) pair at a given tier,
+    cheapest first. A provider that lists several models in the tier (SC3a)
+    contributes one estimate per model; one listing a single model contributes
+    one, exactly as before.
 
     The order is total, deterministic and independent of the order of providers
-    in prices.json (ST6):
+    and models in prices.json (ST6, SC3a):
       1. total_cost_usd (cache-aware, at these token counts) — always primary;
       2. latency_ms (the provider's region latency class), lower first — among
          providers that cost exactly the same for this request, the one that
@@ -115,8 +118,13 @@ def estimate_all_providers(
          cost tie would reward a discount this request does not use; a larger
          context window or a region label says nothing about which tied provider
          serves *this* request better;
-      3. provider_id, alphabetically — a stable final key so two providers tied
-         on cost and latency still sort the same on every load.
+      3. provider_id, alphabetically — a stable key so two providers tied
+         on cost and latency still sort the same on every load;
+      4. model_id, alphabetically (SC3a) — the final key, for two models of the
+         same provider at the same cost (latency is per provider, so it can't
+         separate them). Before SC3a no two estimates shared a provider_id, so
+         this key never decides between single-model providers and the order
+         of a single-model table is unchanged.
     """
     if user_keys is None:
         user_keys = {}
@@ -125,21 +133,19 @@ def estimate_all_providers(
 
     estimates = []
     for provider_id, provider in providers.items():
-        model = provider.models.get(tier)
-        if model is None:
-            continue
-        estimates.append(
-            CostEstimate.compute(
-                provider_id=provider_id,
-                provider=provider,
-                model=model,
-                tier=tier,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                user_keys=user_keys,
-                cached_input_tokens=cached_input_tokens,
+        for model in provider.models_for(tier):
+            estimates.append(
+                CostEstimate.compute(
+                    provider_id=provider_id,
+                    provider=provider,
+                    model=model,
+                    tier=tier,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    user_keys=user_keys,
+                    cached_input_tokens=cached_input_tokens,
+                )
             )
-        )
 
     return sorted(estimates, key=ranking_key)
 
@@ -155,6 +161,7 @@ def compute_savings(chosen: CostEstimate, baseline: CostEstimate) -> dict:
         "saved_usd": round(saved_usd, 8),
         "saved_pct": round(pct, 2),
         "vs_provider": baseline.provider_name,
+        "vs_model_id": baseline.model_id,
         "vs_cost_usd": baseline.total_cost_usd,
     }
 
