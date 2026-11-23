@@ -725,3 +725,22 @@ def test_listing_merges_a_model_listed_in_two_tiers(gen):
 def test_listing_identical_for_single_object_and_list_of_one(gen):
     t = _as_single(synthetic_table())
     assert gen.render(t) == gen.render(_as_list_of_one(t))
+
+
+def test_tier_models_adapts_both_forms_and_rejects_others():
+    assert pt.tier_models({"model_id": "a"}) == [{"model_id": "a"}]
+    assert pt.tier_models([{"model_id": "a"}]) == [{"model_id": "a"}]
+    with pytest.raises(pt.PriceTableError, match="got str"):
+        pt.tier_models("a")
+    assert pt.find_model([{"model_id": "a"}, {"model_id": "b"}], "b") == {"model_id": "b"}
+    assert pt.find_model({"model_id": "a"}, "b") is None
+
+
+def test_record_diff_new_tier_records_every_model_as_new():
+    import price_history as ph
+    old = synthetic_table()
+    new = copy.deepcopy(old)
+    del old["providers"]["alpha"]["models"]["tier_fast"]
+    out = ph.record_diff(old, new, provenance_tier="verified", backend=_Mem())
+    assert {(e["model_id"], e["old"]) for e in out} == {("alpha-mini", None), ("alpha-nano", None)}
+    assert len(out) == 5      # mini in/out, nano in/out/cache
