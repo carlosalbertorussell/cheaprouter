@@ -7,6 +7,118 @@ One task per unit, PARTIAL-honest over DONE-false, closures noted inline.
 
 ## Active
 
+### SC3a — Multiple models per tier
+
+**Goal:** let a provider list several models in one tier, so routing picks the
+cheapest **model** across all providers and models, not the cheapest provider
+with one hand-picked model each. Part (a) of SC3: schema and code only. **No price
+changed and no model was added**; the shipped prices.json is byte-identical and
+routes exactly as before. Part (b), adding models, is SC3b.
+
+**Schema** (`pricing_table.validate_providers`, also run by
+`providers._build_providers` on any table it is given):
+- `providers.<pid>.models.<tier>` is one model object (the existing form) **or a
+  non-empty list** of model objects. Each model keeps its own prices, cache rate,
+  context window and `model_id`. The registry normalises both to a list
+  (`ProviderConfig.models: dict[tier, list[ModelConfig]]`, with `models_for(tier)`
+  and `model_for(tier, model_id=None)`, the latter returning the first listed).
+- Loud errors (`PriceTableError` at import): empty list, a non-object entry, a
+  missing or invalid field, an empty `model_id`, and a `model_id` listed twice in
+  one tier. The same `model_id` in two tiers stays legal (Groq's 120b already is).
+- `refresh.ids.<tier>` is a string (one-model tier, unchanged) or a
+  `{model_id: openrouter_id}` object. A string on a tier of several models is
+  ambiguous and rejected; an object naming a model the tier doesn't list is
+  rejected. An unmapped model is simply not feed-checked, as an unmapped tier
+  wasn't. The json_api strategy (unused) stays per tier and skips list tiers.
+- prices.json keeps the single-object form: nothing needs a list yet.
+
+```json
+"tier_fast": [
+  {"model_id": "a-mini", "input_price_per_1m": 0.08, "output_price_per_1m": 0.30, "context_window": 128000},
+  {"model_id": "a-nano", "input_price_per_1m": 0.05, "output_price_per_1m": 0.20, "context_window": 128000,
+   "cached_input_price_per_1m": 0.01}
+]
+"refresh": {"strategy": "openrouter", "ids": {"tier_fast": {"a-mini": "a/mini", "a-nano": "a/nano"}}}
+```
+
+**Ranking:** one `CostEstimate` per (provider, model). `pricing.ranking_key` is
+cost, latency, `provider_id`, then **`model_id`**. Latency is per provider, so it
+can't separate two models of one provider; `model_id` is the only stable key
+left. Before SC3a no two estimates shared a provider_id, so the new key never
+decides on a one-model table: its order is unchanged.
+
+**Failover: per entry.** `RoutingDecision.ranked_entries` (`[{provider_id,
+model_id}]`, after the health partition) is the failover sequence; the loop walks
+it in cost order. A retired model therefore falls through to the next-cheapest
+entry, which is the same provider's next model whenever that is next in cost
+order, and always is for a caller holding one key. I chose plain cost order over
+"same provider first": jumping to a pricier model of the same provider ahead of a
+cheaper one elsewhere would break cheapest-first, and the other provider's key is
+just as valid. ST6 rules kept: transient and model-unavailable move on, 401/403,
+422 and other 400s stop, mid-stream errors are terminal, `max_failover` counts
+entries (its description says so). Health stays per provider (ST5): every model
+of an unhealthy provider sinks, `deprioritized` lists each provider once, and
+model-unavailable is still `transient: false`.
+
+**Backward-compatible responses:** `decision.to_dict()` keeps every key.
+`ranked_pool` keeps its type and meaning (provider IDs, each once, in the order
+their best model ranks); `ranked_entries` is new. Added `model_id` where it was
+missing: `excluded[]`, `savings.vs_model_id`, `routing.model_id` (the prices.json
+model that answered; `routing.model` stays the served ID). Tools that showed one
+model per tier keep that shape for a one-model tier and show a list for a tier of
+several, mirroring prices.json (`arbitrage_provider_status.models.<tier>`,
+`pricing_get`, which also takes an optional `model_id`). History records are
+unchanged (no `model_id`; ST2/ST3 schema and the privacy whitelist untouched).
+
+**Consumers updated:** `providers.py` (registry), `pricing.py` (estimates, key,
+`vs_model_id`), `router.py` (entries, dedup of `ranked_pool`/`deprioritized`,
+`excluded[].model_id`), `server.py` (route_completion and streaming failover over
+entries, actual cost and `_actual_savings` per entry, observed signal for the
+model that answered, provider_status, get_pricing/estimate_cost via the router),
+`pricing_server.py` (`pricing_get`, `pricing_list`; drift and observed via
+refresh), `refresh.py` (SC2 check over every model with per-model ids; changes
+carry `model_id`; `propose_updated_table`, SC7 classification sort, proposal and
+`apply_significant` target the model by id; observed validation over every
+model), `price_history.record_diff` (old model matched by `model_id` in the tier,
+falling back to the single old model for a one-model migration, as before),
+`scripts/gen_listing.py` (one row per model, merged across tiers as before).
+`health.py` needed nothing. **Fingerprint:** a change on a tier of several models
+appends `|model_id` to its line; a one-model tier keeps the old line, so a closed
+pre-SC3a drift PR is not reopened with a new fingerprint. A pre-SC3a report change
+without `model_id` still works on a one-model tier and raises on a list tier.
+
+**Shipped table unchanged:** `tests/test_shipped_routing_snapshot.py` was
+committed first (5534776) with a fixture generated on 213ec79: 432 cases (3 tiers
+× 3 volumes × 2 cache splits × 6 key sets × 4 constraint sets) pinning winner,
+ranked pool, estimate order and costs, exclusions and savings. It passes unchanged
+after SC3a. `gen_listing.py --check` and `check_prices.py` pass; prices.json and
+MCPIZE_LISTING.md have no diff.
+
+**Tests:** `tests/test_multi_model.py` (synthetic tables only): cheapest across
+providers and models; cache split flipping the model within a provider; tie-break
+over 25 shuffles of provider and model order, and the cost/latency/provider/model
+order; health sinks all of a provider's models; validation errors (13 cases, at
+load too); single object vs list of one identical (routing, listing, fingerprint);
+end to end over `httpx.MockTransport`: winning model sent, 404/400 to the same
+provider's next model, both retired then next provider, `max_failover` counts
+models, 401/403 stop, 503 walks on, streaming before first token, history not
+counting against health; estimate, get_pricing, provider_status, pricing_get/list,
+observed signal; drift check, proposal byte-for-byte, fingerprint separating two
+models, legacy reports; price history; listing rows and winners. 703 tests pass
+(random order, several runs); coverage 97.1%.
+
+**Next — SC3b:** add models across the eight providers with **owner-verified
+prices** (research reports read the provider pages; the owner checks every number
+before merge), using list tiers and per-model `refresh.ids`. Candidates come from
+the research reports gathered alongside SC3a; SC1e owner decisions B and C
+(gemini-4-hydrogen, Ministral 3) stand until revisited with S7.
+
+**Limitation noted, not changed:** `providers.resolve_api_key` only knows provider IDs in the
+module-level `PROVIDERS`, so `route()` on a registry built from another table
+(e.g. `gen_listing.tier_winners` on a synthetic table) treats unknown IDs as
+unkeyed. Harmless for the shipped table; the SC3a tests register the synthetic
+registry.
+
 ### SC7 — Daily drift check and expiry warning
 
 **Goal:** close the one loose loop in the freshness contract. Drift-checking was
@@ -731,7 +843,10 @@ the two forces that fight each other; this sequence resolves them.
   (a) let a provider expose **multiple models per tier** (or fold into S7 capability
   scoring and drop rigid tiers), and (b) add newer models across the current eight
   providers. Comprehensiveness is the payoff, but it only stays honest because SC2
-  keeps it current automatically. Depends on SC2. Deliberately NOT about adding
+  keeps it current automatically. Depends on SC2. **Part (a) done 2026-11-23** — see
+  "SC3a — Multiple models per tier" under Active (list tiers, per-model ranking and
+  failover; no price or model changed). **Part (b) is next as SC3b:** add models with
+  owner-verified prices. Deliberately NOT about adding
   new providers — that's separate and mostly stays deferred (see below). **KPI-coverage driver (2026-09, see PRICING_STRATEGY.md):** if the pricing data is positioned as financial-KPI intelligence, SC3's target list explicitly adds the financially-material players — major labs' full lineups and the cloud gateways (Azure OpenAI / AWS Bedrock / Google Vertex, in scope here as KPI-coverage targets even though deferred as routing targets) — because a KPI series that omits them is incomplete as market intelligence. Rationale shifts from 'more arbitrage' to 'citable coverage'; timing unchanged (still behind SC2).
 
 - ~~**SC1c — Catalog-wide "cheapest current" pass (deferred from SC1b, 2026-10-12).**~~
@@ -740,13 +855,16 @@ the two forces that fight each other; this sequence resolves them.
 - ~~**OpenAI migration (urgent-ish, deferred from SC1b).**~~ **Done 2026-11-01 in
   SC1c:** migrated to gpt-6-luna / gpt-6.1-terra / gpt-6.1-sol (see its Closed entry);
   cache-read rates modelled in SC1e.
-- **Catalog hygiene found in SC1b (small, no decision of substance):** pin Mistral
-  to dated ids (`mistral-small-2603`, `mistral-large-2512`) — no Mistral page says
-  what the `-latest` aliases resolve to; model cache pricing for Mistral (Small 4
-  $0.015, Large 3 $0.05) and qwen-flash/qwen-plus (implicit cache 20% of input),
-  today billed at full input; refresh `context_window` values that drifted
-  (grok-4.3 page says 1M vs 131072; Mistral Small 4 and Large 3 say 256k vs
-  32000/128000).
+- **Catalog hygiene found in SC1b (small, no decision of substance) — PARTIAL.**
+  - ~~Model cache pricing for Mistral (Small 4 $0.015, Large 3 $0.05).~~ Done
+    (modelled since SC1c, Small 4 0.015 / Large 4 0.07; re-checked in SC1e).
+  - ~~Refresh `context_window` values that drifted (grok-4.3 1M vs 131072; Mistral
+    Small 4 and Large 3 256k vs 32000/128000).~~ Done in SC1e.
+  - **Still open:** qwen-flash/qwen-plus implicit cache (20% of input), today billed
+    at the full input rate.
+  - **Still open:** pin Mistral to dated ids (`mistral-small-2603`,
+    `mistral-large-2512`). SC1e's `mistral` note records what the `-latest` aliases
+    resolve to (Small 4, Large 4); the ids themselves are still the aliases.
 
 - **SC4 — Variable / jurisdictional pricing schema.** The one-price-per-model
   schema flattens away real, structured price variation that the arbitrage engine

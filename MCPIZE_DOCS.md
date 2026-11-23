@@ -56,10 +56,12 @@ is automatically excluded from routing.
 ## Capability Tiers
 
 Rather than specifying model names directly, cheaprouter uses three tiers. Each
-tier groups one comparable model per provider; it is a price bucket, not a claim
-that the models are equivalent in quality. The router picks the cheapest provider
-in the tier you ask for, so choose the tier your task needs and use
-`excluded_providers` for models you don't want.
+tier groups comparable models from each provider; it is a price bucket, not a claim
+that the models are equivalent in quality. Today the shipped table lists one model
+per provider per tier, but `prices.json` lets a provider list several in a tier, and
+each is then priced and ranked on its own. The router picks the cheapest model in
+the tier you ask for, so choose the tier your task needs and use
+`excluded_providers` for providers you don't want.
 
 | Tier | Best for | Example models |
 |------|----------|----------------|
@@ -140,9 +142,11 @@ Use this to preview routing decisions before committing.
 }
 ```
 
-**Returns:** JSON routing decision with winner, ranked alternatives, excluded
-providers with reasons, and savings vs. the most expensive eligible provider at the
-estimated token counts.
+**Returns:** JSON routing decision with winner, ranked alternatives (one estimate
+per provider model), excluded providers with reasons, and savings vs. the most
+expensive eligible provider at the estimated token counts. `ranked_pool` lists the
+eligible provider IDs once each in routing order; `ranked_entries` is the failover
+sequence, one `{provider_id, model_id}` per candidate model.
 
 ---
 
@@ -165,7 +169,7 @@ core tool — it selects the winner and makes the actual API call on your behalf
 | `allowed_regions` | array | — | `null` | Restrict to these regions |
 | `estimated_output_tokens` | integer | — | 500 | Used for pre-flight cost routing |
 | `health_aware` | boolean | — | `true` | Deprioritize providers with recent provider-side failures (never excludes) |
-| `max_failover` | integer | — | 2 | On a transient error (429/5xx/timeout) or a retired/unavailable model, how many further providers to try in ranked order. 0 disables. |
+| `max_failover` | integer | — | 2 | On a transient error (429/5xx/timeout) or a retired/unavailable model, how many further candidates to try in ranked order (one per provider model, so a retired model can fall back to the same provider's next one). 0 disables. |
 | `cached_input_tokens` | integer | — | 0 | Of the input tokens, how many are expected cache hits. Priced at each model's cache-read rate where `prices.json` has one (Anthropic, Gemini, Groq, Mistral, DeepSeek, Grok, qwen-max), which can change the cheapest choice. |
 | `stream` | boolean | — | `false` | Consume the provider's streaming endpoint. Lowers time-to-first-token (reported as `time_to_first_token_ms`); the full text still returns as one result. Failover applies only before the first token. Anthropic and OpenAI-compatible providers only; Gemini falls back to a normal call. |
 | `session` | string | — | `null` | Opaque token to attribute spend to (see Sessions below). Required for budget alerts |
@@ -205,11 +209,14 @@ These are list-price figures from `prices.json`, not your provider invoice.
 
 **Failover:** if the first-choice provider returns a transient error (rate limit,
 server error, or timeout), cheaprouter automatically retries the next provider in
-ranked order, up to `max_failover` times. The same happens when a provider says
+ranked order, up to `max_failover` times. Failover walks candidate models, not
+providers: a provider listing several models in the tier has one entry per model.
+The same happens when a provider says
 the *model* is retired or unavailable (a 404 from the completion endpoint, or a
 400 carrying `model_not_found`, `model_decommissioned`, `not_found_error`,
-`NOT_FOUND` or a "does not exist" / "deprecated" message): another provider serves
-a different model, so it is worth trying. Other non-transient errors (bad key,
+`NOT_FOUND` or a "does not exist" / "deprecated" message): the next entry serves a
+different model (the same provider's next model, if that is next cheapest), so it
+is worth trying. Other non-transient errors (bad key,
 malformed request, 422) stop immediately, since they'd fail the same way
 everywhere. The response includes `failed_over` (bool) and an `attempts` list
 showing each provider tried, its model ID and its outcome (`success`,
@@ -455,12 +462,12 @@ guess.
 
 Providers are selected using the following priority order:
 
-1. **Price** — always the primary signal; providers sorted cheapest-first for the given tier and token volume. Exact cost ties break on latency (lower first), then `provider_id`, so the order of `prices.json` never decides
+1. **Price** — always the primary signal; providers sorted cheapest-first for the given tier and token volume. Exact cost ties break on latency (lower first), then `provider_id`, then `model_id`, so the order of `prices.json` never decides. A provider listing several models in a tier is ranked once per model
 2. **Key availability** — providers without a supplied API key are excluded
 3. **Latency** — when `latency_sensitive: true`, providers with latency above 300ms are excluded (primarily affects DeepSeek and Qwen from outside Asia)
 4. **Region** — `allowed_regions` restricts the eligible pool to specific regions; useful for data residency requirements
 5. **Health** — when `health_aware: true` (default), providers whose recent success rate is at or below half are deprioritized: moved behind *all* healthy providers, whatever their price. They are never excluded, so a blip can't strand you and an all-unhealthy pool still returns the cheapest option. Health is scored on global history shared across users, counting only provider-side failures (never a caller's bad key or bad request), capping each session's contribution and needing failures from at least two sessions (one on a local stdio server). `route_completion` reports any `deprioritized_providers` in its response.
-6. **Failover** — if the chosen provider returns a transient error or reports the model retired or unavailable, routing walks down the ranked pool to the next provider automatically (up to `max_failover`). This uses the same ordering health produces, so failover prefers healthy providers first.
+6. **Failover** — if the chosen provider returns a transient error or reports the model retired or unavailable, routing walks down the ranked entries to the next (provider, model) automatically (up to `max_failover`). This uses the same ordering health produces, so failover prefers healthy providers first.
 
 **Prompt caching:** pass `cached_input_tokens` to price cache-hit input at each model's cache-read rate. `prices.json` models cache-read rates for Anthropic, OpenAI, Gemini, Groq, Mistral, DeepSeek, Grok and qwen-max, so on cache-heavy requests the cheapest provider can differ from the headline input-price ranking. Only the cache-read rate is modelled, not cache-write surcharges. qwen-flash and qwen-plus bill cached tokens at the full input rate, so they're never wrongly favoured.
 
@@ -568,10 +575,12 @@ Verified price for one provider + capability tier, provenance-first.
 ```json
 { "provider": "deepseek", "tier": "tier_balanced" }
 ```
-Returns the provenance block + input/output/cache prices for that model.
+Returns the provenance block + input/output/cache prices for that model. If the
+provider lists several models in the tier, they come back as a `models` list; pass
+an optional `model_id` to get one.
 
 ### `pricing_list`
-The whole current verified table (optional `tier` filter).
+The whole current verified table, one row per provider, tier and model (optional `tier` filter).
 ```json
 { "tier": "tier_fast" }
 ```

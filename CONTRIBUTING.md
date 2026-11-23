@@ -26,7 +26,7 @@ Providers live in `prices.json` under `providers`; `providers.py` builds the
 `PROVIDERS` registry from it. Each entry needs:
 
 1. `name`, `region` (`us`/`eu`/`cn`), `base_url`, `api_key_env`, `protocol` (`anthropic`/`openai`/`gemini`) and a `refresh` block
-2. Three `models` entries — one per tier (`tier_fast`, `tier_balanced`, `tier_powerful`) — with `model_id`, current per-1M-token input/output prices, `context_window`, and `cached_input_price_per_1m` if the provider publishes a cache-read rate
+2. Three `models` entries — one per tier (`tier_fast`, `tier_balanced`, `tier_powerful`) — with `model_id`, current per-1M-token input/output prices, `context_window`, and `cached_input_price_per_1m` if the provider publishes a cache-read rate. A tier is one model object, or a non-empty list of them when the provider has several comparable models (SC3a); model_ids must be unique within a tier. With `refresh.strategy: "openrouter"`, a list tier maps each model in `refresh.ids`: `{"tier_fast": {"<model_id>": "<openrouter id>"}}`
 3. A `pricing_urls` entry pointing at the provider's pricing page
 3. If the provider uses an OpenAI-compatible API (most do), no client changes are needed. Native protocols require a handler in `client.py`.
 
