@@ -201,17 +201,17 @@
         },
         "tier_balanced": {
           "model_id": "mistral-large-latest",
-          "input_price_per_1m": 0.7,
-          "output_price_per_1m": 2.1,
+          "input_price_per_1m": 2.0,
+          "output_price_per_1m": 6.0,
           "context_window": 1000000,
-          "cached_input_price_per_1m": 0.07
+          "cached_input_price_per_1m": 0.2
         },
         "tier_powerful": {
           "model_id": "mistral-large-latest",
-          "input_price_per_1m": 0.7,
-          "output_price_per_1m": 2.1,
+          "input_price_per_1m": 2.0,
+          "output_price_per_1m": 6.0,
           "context_window": 1000000,
-          "cached_input_price_per_1m": 0.07
+          "cached_input_price_per_1m": 0.2
         }
       },
       "refresh": {
@@ -246,10 +246,10 @@
         },
         "tier_powerful": {
           "model_id": "deepseek-v4-pro",
-          "input_price_per_1m": 0.66,
-          "output_price_per_1m": 1.98,
+          "input_price_per_1m": 0.78599,
+          "output_price_per_1m": 1.5712,
           "context_window": 1000000,
-          "cached_input_price_per_1m": 0.022
+          "cached_input_price_per_1m": 0.2
         }
       },
       "refresh": {
